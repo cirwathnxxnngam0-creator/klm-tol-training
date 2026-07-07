@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import AuthScreen from './components/AuthScreen'
 import ProfileScreen from './components/ProfileScreen'
 import DashboardScreen from './components/DashboardScreen'
@@ -22,6 +22,9 @@ function App() {
 
   const [activeTab, setActiveTab] = useState('workouts');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  
+  // Shared exercise ID selection state (used to sync picker between Dashboard and Camera)
+  const [selectedExerciseId, setSelectedExerciseId] = useState('dumbbell-hammer-curl');
 
   // Sync authentication success
   const handleAuthSuccess = (userData) => {
@@ -85,10 +88,14 @@ function App() {
           <DashboardScreen 
             onNavigate={handleNavigate} 
             refreshTrigger={refreshTrigger} 
+            onSelectExercise={(id) => setSelectedExerciseId(id)}
           />
         )}
         {activeTab === 'camera' && (
-          <CameraPoseOverlay />
+          <CameraPoseOverlay 
+            selectedExerciseId={selectedExerciseId} 
+            setSelectedExerciseId={setSelectedExerciseId} 
+          />
         )}
         {activeTab === 'history' && (
           <HistoryView 

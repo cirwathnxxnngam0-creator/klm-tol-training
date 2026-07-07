@@ -1,26 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { exercises } from '../data/exercises';
 
-export default function DashboardScreen({ onNavigate, refreshTrigger }) {
+export default function DashboardScreen({ onNavigate, refreshTrigger, onSelectExercise }) {
   const [selectedExercise, setSelectedExercise] = useState(null);
   const [activeSession, setActiveSession] = useState(null);
-  const [cameraExercise, setCameraExercise] = useState(null);
   const [stats, setStats] = useState({});
 
-  // Active workout states
+  // Active manual workout session states
   const [sessionTimer, setSessionTimer] = useState(0);
   const [sets, setSets] = useState([]);
   const timerRef = useRef(null);
-
-  // Camera stream and canvas states
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const [stream, setStream] = useState(null);
-  const [cameraError, setCameraError] = useState(null);
-  const [aiFeedback, setAiFeedback] = useState('Position yourself in view...');
-  const [simulatedReps, setSimulatedReps] = useState(0);
-  const [simulatedAngle, setSimulatedAngle] = useState(180);
-  const animationRef = useRef(null);
 
   // Fetch quick stats from localStorage (PR, total workouts)
   useEffect(() => {
@@ -42,9 +31,9 @@ export default function DashboardScreen({ onNavigate, refreshTrigger }) {
     } catch (e) {
       console.error(e);
     }
-  }, [refreshTrigger, activeSession, cameraExercise]);
+  }, [refreshTrigger, activeSession]);
 
-  // Handle active workout timer
+  // Handle active manual workout timer
   useEffect(() => {
     if (activeSession) {
       setSessionTimer(0);
@@ -59,177 +48,16 @@ export default function DashboardScreen({ onNavigate, refreshTrigger }) {
     };
   }, [activeSession]);
 
-  // Camera & skeletal simulation loop
-  useEffect(() => {
-    if (cameraExercise) {
-      startCamera();
-      // Setup simulator for camera skeleton
-      let frame = 0;
-      let direction = -1; // -1 down, 1 up
-      let angle = 170;
-      let repCount = 0;
-      let lastRepTime = 0;
-
-      const loop = () => {
-        frame++;
-        
-        // Simulating biceps curl or deadlift motion angles
-        if (frame % 4 === 0) {
-          if (direction === -1) {
-            angle -= 3;
-            if (angle <= 45) {
-              direction = 1;
-              // Feedback cues
-              const feedbacks = ['Great depth!', 'Keep elbows tucked!', 'Perfect squeeze!', 'Squeeze at top!'];
-              setAiFeedback(feedbacks[Math.floor(Math.random() * feedbacks.length)]);
-            }
-          } else {
-            angle += 3;
-            if (angle >= 170) {
-              direction = -1;
-              const now = Date.now();
-              if (now - lastRepTime > 1500) {
-                repCount += 1;
-                setSimulatedReps(repCount);
-                lastRepTime = now;
-                setAiFeedback('Form looking excellent! Down slowly...');
-              }
-            }
-          }
-          setSimulatedAngle(Math.round(angle));
-        }
-
-        // Draw camera frame & skeleton overlay on canvas
-        const canvas = canvasRef.current;
-        const video = videoRef.current;
-        if (canvas) {
-          const ctx = canvas.getContext('2d');
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-          // Renders visualizer overlay
-          ctx.strokeStyle = '#a855f7'; // purple accent
-          ctx.lineWidth = 3;
-          ctx.fillStyle = '#a855f7';
-
-          // If video is loaded, we can draw a mirror image or visual elements
-          if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
-            ctx.save();
-            ctx.scale(-1, 1);
-            ctx.translate(-canvas.width, 0);
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            ctx.restore();
-          } else {
-            // Draw gradient background if no camera
-            const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-            grad.addColorStop(0, '#111827');
-            grad.addColorStop(1, '#1f2937');
-            ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-          }
-
-          // Skeletal simulation lines & circles
-          const shoulderX = canvas.width / 2;
-          const shoulderY = canvas.height * 0.35;
-          const elbowX = shoulderX - 45 + Math.sin(frame * 0.05) * 15;
-          const elbowY = shoulderY + 60;
-          
-          // Calculate wrist based on simulated angle
-          const rad = (angle * Math.PI) / 180;
-          const wristX = elbowX + Math.cos(rad - Math.PI/2) * 55;
-          const wristY = elbowY + Math.sin(rad - Math.PI/2) * 55;
-
-          // Draw skeleton lines
-          ctx.beginPath();
-          ctx.moveTo(shoulderX, shoulderY);
-          ctx.lineTo(elbowX, elbowY);
-          ctx.lineTo(wristX, wristY);
-          ctx.stroke();
-
-          // Draw joints
-          ctx.fillStyle = '#34d399'; // green joints
-          ctx.beginPath();
-          ctx.arc(shoulderX, shoulderY, 6, 0, Math.PI * 2);
-          ctx.arc(elbowX, elbowY, 6, 0, Math.PI * 2);
-          ctx.arc(wristX, wristY, 6, 0, Math.PI * 2);
-          ctx.fill();
-
-          // UI text/overlays on canvas
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-          ctx.fillRect(10, 10, 140, 60);
-          ctx.fillStyle = '#ffffff';
-          ctx.font = '12px monospace';
-          ctx.fillText(`JOINT ANGLE: ${Math.round(angle)}°`, 18, 30);
-          ctx.fillText(`REP COUNT: ${repCount}`, 18, 48);
-
-          // Angle visualizer arc
-          ctx.strokeStyle = angle < 90 ? '#34d399' : '#f59e0b';
-          ctx.beginPath();
-          ctx.arc(elbowX, elbowY, 20, 0, rad);
-          ctx.stroke();
-        }
-
-        animationRef.current = requestAnimationFrame(loop);
-      };
-
-      animationRef.current = requestAnimationFrame(loop);
-    } else {
-      stopCamera();
-    }
-
-    return () => {
-      stopCamera();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cameraExercise]);
-
-  const startCamera = async () => {
-    setCameraError(null);
-    setSimulatedReps(0);
-    setAiFeedback('Initializing smart detection model...');
-    try {
-      const streamData = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: 640, height: 480 },
-        audio: false
-      });
-      setStream(streamData);
-      if (videoRef.current) {
-        videoRef.current.srcObject = streamData;
-      }
-      setTimeout(() => {
-        setAiFeedback('Posture alignment scanner ready. Start exercises.');
-      }, 1500);
-    } catch (err) {
-      console.warn('Camera access denied or unavailable. Running in simulated skeletal mode.', err);
-      setCameraError('Camera unavailable. Using advanced animation simulation instead.');
-    }
-  };
-
-  const stopCamera = () => {
-    if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current);
-    }
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
-    }
-  };
-
   const handleStartManualSession = (exercise) => {
     setSelectedExercise(null);
-    // Initialize default sets based on exercise configuration
-    const initialSets = Array.from({ length: exercise.defaultSets }, (_, i) => ({
+    const initialSets = Array.from({ length: exercise.defaultSets || 3 }, (_, i) => ({
       setId: i + 1,
-      weight: exercise.defaultWeightKg,
-      reps: exercise.defaultReps,
+      weight: exercise.defaultWeightKg || 10,
+      reps: exercise.defaultReps || 10,
       completed: false
     }));
     setSets(initialSets);
     setActiveSession(exercise);
-  };
-
-  const handleStartCameraSession = (exercise) => {
-    setSelectedExercise(null);
-    setCameraExercise(exercise);
   };
 
   const handleSaveManualSession = () => {
@@ -247,45 +75,16 @@ export default function DashboardScreen({ onNavigate, refreshTrigger }) {
       category: activeSession.category,
       date: new Date().toISOString(),
       durationSec: sessionTimer,
-      sets: completedSets,
+      sets: completedSets.map(s => ({ ...s, completed: true })),
       mode: 'Manual'
     };
 
-    saveWorkoutToLocalStorage(newLog);
-    setActiveSession(null);
-    alert('Workout logged successfully!');
-  };
-
-  const handleSaveCameraSession = () => {
-    if (!cameraExercise) return;
-    if (simulatedReps === 0) {
-      alert('Log at least 1 rep from the camera detection session.');
-      return;
-    }
-
-    const newLog = {
-      id: `log-${Date.now()}`,
-      exerciseId: cameraExercise.id,
-      exerciseName: cameraExercise.name,
-      category: cameraExercise.category,
-      date: new Date().toISOString(),
-      durationSec: 45, // approx simulated duration
-      sets: [
-        { setId: 1, weight: cameraExercise.defaultWeightKg, reps: simulatedReps, completed: true }
-      ],
-      mode: 'AI Camera'
-    };
-
-    saveWorkoutToLocalStorage(newLog);
-    setCameraExercise(null);
-    alert('AI Session logged successfully!');
-  };
-
-  const saveWorkoutToLocalStorage = (workoutLog) => {
     try {
-      const currentHistory = JSON.parse(localStorage.getItem('workout_history') || '[]');
-      currentHistory.unshift(workoutLog);
-      localStorage.setItem('workout_history', JSON.stringify(currentHistory));
+      const stored = JSON.parse(localStorage.getItem('workout_history') || '[]');
+      stored.unshift(newLog);
+      localStorage.setItem('workout_history', JSON.stringify(stored));
+      setActiveSession(null);
+      alert('Manual workout logged successfully!');
     } catch (e) {
       console.error('Failed to save to localStorage', e);
     }
@@ -298,52 +97,61 @@ export default function DashboardScreen({ onNavigate, refreshTrigger }) {
   };
 
   return (
-    <div className="w-full max-w-md mx-auto p-4 pb-24 text-left">
-      {/* Premium Glassmorphic Header */}
-      <header className="mb-6 p-4 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 shadow-lg">
-        <h1 className="text-2xl font-bold tracking-tight text-white m-0">FitAlign Pro</h1>
-        <p className="text-xs text-purple-300">Advanced Posture Analysis & Tracking</p>
-      </header>
-
-      {/* Main Exercises List */}
-      {!activeSession && !cameraExercise && (
+    <div className="fade-in" style={{ width: '100%' }}>
+      {/* Exercises List Hub */}
+      {!activeSession && (
         <>
-          <h2 className="text-lg font-semibold text-white mb-3 px-1">Selected Exercises</h2>
-          <div className="space-y-4">
+          <h2 style={{ fontSize: '1rem', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '0.75rem', fontWeight: '700' }}>
+            Select Training Movement
+          </h2>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {exercises.map((ex) => {
               const exStat = stats[ex.id] || { totalWorkouts: 0, maxWeight: 0 };
               return (
                 <div
                   key={ex.id}
+                  className="glass-card"
+                  style={{ cursor: 'pointer', transition: 'transform 0.2s', padding: '1.25rem' }}
                   onClick={() => setSelectedExercise(ex)}
-                  className="group relative overflow-hidden rounded-2xl bg-white/5 backdrop-blur-lg border border-white/10 hover:border-purple-500/50 p-4 transition-all duration-300 cursor-pointer shadow-md hover:shadow-purple-500/10 flex flex-col justify-between"
+                  onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
                 >
-                  <div>
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                        {ex.category}
-                      </span>
-                      <span className="text-xs text-gray-400">{ex.difficulty}</span>
-                    </div>
-                    <h3 className="text-lg font-bold text-white mb-1 group-hover:text-purple-300 transition-colors">
-                      {ex.name}
-                    </h3>
-                    <p className="text-xs text-gray-400 line-clamp-2 mb-3">
-                      {ex.description}
-                    </p>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                    <span style={{
+                      fontSize: '0.65rem',
+                      fontWeight: '700',
+                      padding: '0.15rem 0.5rem',
+                      borderRadius: 'var(--radius-full)',
+                      background: 'var(--primary-glow)',
+                      color: 'var(--primary)',
+                      border: '1px solid hsla(var(--h-primary), 85%, 62%, 0.3)',
+                      textTransform: 'uppercase'
+                    }}>
+                      {ex.category}
+                    </span>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{ex.difficulty}</span>
                   </div>
+
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
+                    {ex.name}
+                  </h3>
                   
-                  {/* Glassmorphic Stats Section */}
-                  <div className="grid grid-cols-2 gap-2 mt-2 pt-3 border-t border-white/5 text-xs">
-                    <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                      <p className="text-gray-400">Total Workouts</p>
-                      <p className="text-white font-bold text-sm mt-0.5">{exStat.totalWorkouts || 0}</p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: '140%', marginBottom: '1rem' }}>
+                    {ex.description}
+                  </p>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', borderTop: '1px solid var(--border-light)', paddingTop: '0.75rem' }}>
+                    <div style={{ background: 'hsla(0, 0%, 100%, 0.02)', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }}>
+                      <span style={{ fontSize: '0.6rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Total Workouts</span>
+                      <div style={{ fontSize: '0.9rem', fontWeight: '800', color: 'var(--text-primary)', marginTop: '0.1rem' }}>{exStat.totalWorkouts || 0}</div>
                     </div>
-                    <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                      <p className="text-gray-400">Personal Record</p>
-                      <p className="text-purple-300 font-bold text-sm mt-0.5">
+
+                    <div style={{ background: 'hsla(0, 0%, 100%, 0.02)', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }}>
+                      <span style={{ fontSize: '0.6rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Personal Record</span>
+                      <div style={{ fontSize: '0.9rem', fontWeight: '800', color: 'var(--secondary)', marginTop: '0.1rem' }}>
                         {exStat.maxWeight ? `${exStat.maxWeight} kg` : '--'}
-                      </p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -351,288 +159,252 @@ export default function DashboardScreen({ onNavigate, refreshTrigger }) {
             })}
           </div>
 
-          <div className="mt-6 p-4 rounded-xl bg-purple-500/15 border border-purple-500/20 text-center">
-            <p className="text-xs text-purple-200">
-              💡 Click any exercise card to view step-by-step instructions, logs, start live camera scanning, or manually log details.
+          <div className="glass-card" style={{ marginTop: '1rem', background: 'var(--primary-glow)', borderColor: 'hsla(var(--h-primary), 85%, 62%, 0.25)', textAlign: 'center', padding: '1rem' }}>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: '140%' }}>
+              💡 <strong>How it works:</strong> Click on a training card to view posture instructions, log sets manually, or launch the live camera to track your bone positions and angles!
             </p>
           </div>
         </>
       )}
 
-      {/* Exercise Detail Modal / View */}
+      {/* Exercise Detail Modal Overlay */}
       {selectedExercise && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-zinc-900 border border-white/10 rounded-t-3xl rounded-b-xl p-6 shadow-2xl animate-in slide-in-from-bottom duration-300 text-left">
-            <div className="flex justify-between items-start mb-4">
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(4px)',
+          zIndex: 200,
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'center'
+        }} onClick={() => setSelectedExercise(null)}>
+          
+          <div 
+            className="glass-card fade-in" 
+            style={{
+              width: '100%',
+              maxWidth: '440px',
+              borderBottomLeftRadius: 0,
+              borderBottomRightRadius: 0,
+              borderTopLeftRadius: 'var(--radius-lg)',
+              borderTopRightRadius: 'var(--radius-lg)',
+              padding: '1.5rem',
+              maxHeight: '80vh',
+              overflowY: 'auto'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
               <div>
-                <span className="text-xs font-bold text-purple-400 uppercase tracking-widest">
+                <span style={{ fontSize: '0.65rem', fontWeight: '700', color: 'var(--primary)', textTransform: 'uppercase' }}>
                   {selectedExercise.category}
                 </span>
-                <h2 className="text-xl font-bold text-white mt-1">{selectedExercise.name}</h2>
+                <h2 style={{ fontSize: '1.4rem', fontWeight: '900', fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)', marginTop: '0.2rem' }}>
+                  {selectedExercise.name}
+                </h2>
               </div>
-              <button
+              <button 
                 onClick={() => setSelectedExercise(null)}
-                className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white"
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.25rem', cursor: 'pointer' }}
               >
                 ✕
               </button>
             </div>
 
-            <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-1">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
-                <h4 className="text-xs font-bold text-gray-400 uppercase">Target Muscles</h4>
-                <p className="text-sm text-white mt-1">{selectedExercise.targetMuscle}</p>
+                <h4 style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Target Muscles</h4>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>{selectedExercise.targetMuscle}</p>
               </div>
 
               <div>
-                <h4 className="text-xs font-bold text-gray-400 uppercase">Instructions</h4>
-                <ol className="list-decimal list-inside text-sm text-gray-300 space-y-1.5 mt-1">
+                <h4 style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Instructions</h4>
+                <ol style={{ paddingLeft: '1rem', fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                   {selectedExercise.instructions.map((inst, idx) => (
-                    <li key={idx} className="pl-1 text-xs leading-relaxed">{inst}</li>
+                    <li key={idx} style={{ lineHeight: '140%' }}>{inst}</li>
                   ))}
                 </ol>
               </div>
 
               <div>
-                <h4 className="text-xs font-bold text-gray-400 uppercase">Pro Tips</h4>
-                <ul className="list-disc list-inside text-xs text-amber-300/90 space-y-1 mt-1">
+                <h4 style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Pro Form Tips</h4>
+                <ul style={{ paddingLeft: '1rem', fontSize: '0.8rem', color: 'hsl(var(--h-warning), 85%, 70%)', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
                   {selectedExercise.tips.map((tip, idx) => (
-                    <li key={idx}>{tip}</li>
+                    <li key={idx} style={{ lineHeight: '140%' }}>{tip}</li>
                   ))}
                 </ul>
               </div>
             </div>
 
             {/* Quick Action Grid */}
-            <div className="grid grid-cols-2 gap-3 mt-6">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '1.5rem' }}>
               <button
                 onClick={() => handleStartManualSession(selectedExercise)}
-                className="w-full py-3 px-4 rounded-xl bg-white/10 hover:bg-white/15 text-white font-semibold text-sm border border-white/15 transition-all text-center"
+                className="btn btn-secondary"
+                style={{ padding: '0.75rem' }}
               >
                 📝 Manual Log
               </button>
               <button
-                onClick={() => handleStartCameraSession(selectedExercise)}
-                className="w-full py-3 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-sm border border-purple-500 shadow-md shadow-purple-600/30 transition-all text-center"
+                onClick={() => {
+                  setSelectedExercise(null);
+                  if (onSelectExercise) onSelectExercise(selectedExercise.id);
+                  onNavigate('camera'); // Switches to AI camera tab
+                }}
+                className="btn btn-primary"
+                style={{ padding: '0.75rem' }}
               >
                 📷 Start Live AI
               </button>
             </div>
-            
+          </div>
+        </div>
+      )}
+
+      {/* Active Manual Workout Session */}
+      {activeSession && (
+        <div className="glass-card fade-in" style={{ padding: '1.25rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-light)', paddingBottom: '0.75rem' }}>
+            <div>
+              <span style={{ fontSize: '0.65rem', color: 'var(--primary)', fontWeight: '700', textTransform: 'uppercase' }}>Log Session</span>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)', marginTop: '0.15rem' }}>
+                {activeSession.name}
+              </h2>
+            </div>
+            <div style={{
+              background: 'hsla(350, 80%, 55%, 0.12)',
+              border: '1px solid hsla(350, 80%, 55%, 0.3)',
+              color: 'var(--danger)',
+              padding: '0.4rem 0.75rem',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '1rem',
+              fontWeight: '700',
+              fontFamily: 'monospace'
+            }}>
+              ⏱️ {formatTime(sessionTimer)}
+            </div>
+          </div>
+
+          {/* Sets Config Box */}
+          <div className="glass-card" style={{ padding: '0.75rem', marginBottom: '1.25rem', background: 'hsla(0, 0%, 100%, 0.01)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 2fr 1fr', fontSize: '0.65rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.5rem', textAlign: 'center' }}>
+              <span>SET</span>
+              <span>WEIGHT (KG)</span>
+              <span>REPS</span>
+              <span>DONE</span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {sets.map((set, idx) => (
+                <div
+                  key={set.setId}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 2fr 2fr 1fr',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.5rem',
+                    borderRadius: 'var(--radius-sm)',
+                    background: set.completed ? 'var(--primary-glow)' : 'transparent',
+                    border: set.completed ? '1px solid hsla(var(--h-primary), 85%, 62%, 0.3)' : '1px solid var(--border-light)'
+                  }}
+                >
+                  <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-secondary)' }}>#{set.setId}</span>
+                  
+                  <input
+                    type="number"
+                    value={set.weight}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value) || 0;
+                      setSets(prev => prev.map(s => s.setId === set.setId ? { ...s, weight: val } : s));
+                    }}
+                    className="input-field"
+                    style={{ padding: '0.35rem', textAlign: 'center', fontSize: '0.8rem', margin: 0 }}
+                  />
+                  
+                  <input
+                    type="number"
+                    value={set.reps}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value) || 0;
+                      setSets(prev => prev.map(s => s.setId === set.setId ? { ...s, reps: val } : s));
+                    }}
+                    className="input-field"
+                    style={{ padding: '0.35rem', textAlign: 'center', fontSize: '0.8rem', margin: 0 }}
+                  />
+
+                  <button
+                    onClick={() => {
+                      setSets(prev => prev.map(s => s.setId === set.setId ? { ...s, completed: !s.completed } : s));
+                    }}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: set.completed ? 'var(--primary)' : 'var(--bg-surface-elevated)',
+                      color: set.completed ? '#fff' : 'var(--text-muted)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '0.75rem',
+                      fontWeight: '700',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    ✓
+                  </button>
+                </div>
+              ))}
+            </div>
+
             <button
               onClick={() => {
-                setSelectedExercise(null);
-                onNavigate('history'); // Navigates to history view
+                setSets(prev => [
+                  ...prev,
+                  {
+                    setId: prev.length + 1,
+                    weight: prev[prev.length - 1]?.weight || activeSession.defaultWeightKg,
+                    reps: prev[prev.length - 1]?.reps || activeSession.defaultReps,
+                    completed: false
+                  }
+                ]);
               }}
-              className="w-full mt-3 py-2 text-center text-xs text-purple-400 hover:text-purple-300 hover:underline"
+              className="btn btn-secondary"
+              style={{ marginTop: '0.75rem', width: '100%', padding: '0.5rem', fontSize: '0.75rem' }}
             >
-              View Exercise Logs & History
+              + Add Next Set
+            </button>
+          </div>
+
+          {/* Action Log Save / Discard */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <button
+              onClick={handleSaveManualSession}
+              className="btn btn-primary"
+              style={{ padding: '0.85rem' }}
+            >
+              💾 Save Session & Log
+            </button>
+            <button
+              onClick={() => {
+                if (confirm('Discard current workout session?')) {
+                  setActiveSession(null);
+                }
+              }}
+              className="btn btn-secondary"
+              style={{ padding: '0.75rem', color: 'var(--danger)', borderColor: 'hsla(350, 80%, 55%, 0.15)' }}
+            >
+              Discard Session
             </button>
           </div>
         </div>
       )}
-
-      {/* Active Workout Session Screen */}
-      {activeSession && (
-        <div className="fixed inset-0 z-50 bg-zinc-950 flex flex-col p-4 text-white overflow-y-auto">
-          <div className="max-w-md mx-auto w-full flex-grow flex flex-col justify-between py-4">
-            <div>
-              <div className="flex justify-between items-center mb-6">
-                <div>
-                  <span className="text-xs text-purple-400 font-bold uppercase tracking-wider">Session Active</span>
-                  <h2 className="text-xl font-bold text-white mt-1">{activeSession.name}</h2>
-                </div>
-                <div className="bg-red-500/10 border border-red-500/30 text-red-400 font-mono text-lg px-3 py-1.5 rounded-xl">
-                  ⏱️ {formatTime(sessionTimer)}
-                </div>
-              </div>
-
-              {/* Set Tracker Table */}
-              <div className="bg-white/5 border border-white/10 rounded-2xl p-4 mb-6">
-                <div className="grid grid-cols-4 text-xs text-gray-400 font-bold mb-3 text-center">
-                  <span>SET</span>
-                  <span>KG</span>
-                  <span>REPS</span>
-                  <span>DONE</span>
-                </div>
-
-                <div className="space-y-3">
-                  {sets.map((set) => (
-                    <div
-                      key={set.setId}
-                      className={`grid grid-cols-4 gap-2 items-center text-center p-2 rounded-xl transition-all ${
-                        set.completed ? 'bg-purple-500/15 border border-purple-500/30' : 'bg-white/5 border border-transparent'
-                      }`}
-                    >
-                      <span className="font-bold text-sm text-gray-300">Set {set.setId}</span>
-                      <input
-                        type="number"
-                        value={set.weight}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          setSets(prev => prev.map(s => s.setId === set.setId ? { ...s, weight: val } : s));
-                        }}
-                        className="w-full bg-zinc-800 text-white border border-white/10 rounded-lg py-1 px-1.5 text-center text-sm font-semibold focus:outline-none focus:border-purple-500"
-                      />
-                      <input
-                        type="number"
-                        value={set.reps}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value) || 0;
-                          setSets(prev => prev.map(s => s.setId === set.setId ? { ...s, reps: val } : s));
-                        }}
-                        className="w-full bg-zinc-800 text-white border border-white/10 rounded-lg py-1 px-1.5 text-center text-sm font-semibold focus:outline-none focus:border-purple-500"
-                      />
-                      <button
-                        onClick={() => {
-                          setSets(prev => prev.map(s => s.setId === set.setId ? { ...s, completed: !s.completed } : s));
-                        }}
-                        className={`w-8 h-8 rounded-full mx-auto flex items-center justify-center border transition-all ${
-                          set.completed
-                            ? 'bg-purple-500 border-purple-400 text-white'
-                            : 'border-white/20 text-gray-500 hover:border-white/40'
-                        }`}
-                      >
-                        ✓
-                      </button>
-                    </div>
-                  ))}
-                </div>
-
-                <button
-                  onClick={() => {
-                    setSets(prev => [
-                      ...prev,
-                      {
-                        setId: prev.length + 1,
-                        weight: prev[prev.length - 1]?.weight || activeSession.defaultWeightKg,
-                        reps: prev[prev.length - 1]?.reps || activeSession.defaultReps,
-                        completed: false
-                      }
-                    ]);
-                  }}
-                  className="w-full mt-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 text-xs font-semibold"
-                >
-                  + Add Set
-                </button>
-              </div>
-            </div>
-
-            {/* Save & Cancel Actions */}
-            <div className="space-y-3">
-              <button
-                onClick={handleSaveManualSession}
-                className="w-full py-3.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-sm shadow-lg shadow-purple-600/30 transition-all text-center"
-              >
-                💾 Save Session & Finish
-              </button>
-              <button
-                onClick={() => {
-                  if (confirm('Discard current workout session?')) {
-                    setActiveSession(null);
-                  }
-                }}
-                className="w-full py-3 rounded-xl bg-transparent hover:bg-red-500/10 text-red-400 border border-red-500/20 text-sm font-semibold transition-all text-center"
-              >
-                Discard Session
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* AI Posture Tracking camera View */}
-      {cameraExercise && (
-        <div className="fixed inset-0 z-50 bg-zinc-950 flex flex-col p-4 text-white overflow-hidden">
-          <div className="max-w-md mx-auto w-full h-full flex flex-col justify-between py-2">
-            
-            {/* Header */}
-            <div className="flex justify-between items-center mb-2">
-              <div>
-                <span className="text-xs text-red-500 font-mono animate-pulse font-bold flex items-center gap-1">
-                  ● LIVE AI POSTURE ANALYZER
-                </span>
-                <h3 className="text-base font-bold">{cameraExercise.name}</h3>
-              </div>
-              <button
-                onClick={() => setCameraExercise(null)}
-                className="px-3 py-1 bg-white/10 hover:bg-white/15 rounded-lg text-xs"
-              >
-                Exit Camera
-              </button>
-            </div>
-
-            {/* Video / Canvas Arena */}
-            <div className="relative w-full aspect-[4/3] rounded-2xl overflow-hidden bg-black border border-white/10 shadow-inner flex items-center justify-center">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="absolute w-full h-full object-cover scale-x-[-1] opacity-0"
-              />
-              <canvas
-                ref={canvasRef}
-                width={640}
-                height={480}
-                className="w-full h-full object-cover rounded-2xl"
-              />
-              
-              {/* Overlay Glass Alert for camera error / notice */}
-              {cameraError && (
-                <div className="absolute top-2 left-2 right-2 p-2 rounded-xl bg-amber-500/25 backdrop-blur-md border border-amber-500/35 text-[10px] text-amber-200">
-                  ⚠️ {cameraError}
-                </div>
-              )}
-
-              {/* Bottom Real-time Feedback HUD Overlay */}
-              <div className="absolute bottom-3 left-3 right-3 p-3 rounded-xl bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] uppercase text-gray-400">AI Feed</p>
-                  <p className="text-sm font-semibold text-purple-300 mt-0.5">{aiFeedback}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] uppercase text-gray-400">Angle</p>
-                  <p className="text-sm font-mono font-bold text-white mt-0.5">{simulatedAngle}°</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Big Rep HUD */}
-            <div className="grid grid-cols-2 gap-3 my-4">
-              <div className="p-4 rounded-2xl bg-white/5 border border-white/10 text-center">
-                <p className="text-xs uppercase text-gray-400 font-bold">Reps Detected</p>
-                <p className="text-4xl font-black text-purple-400 font-mono mt-1">{simulatedReps}</p>
-              </div>
-              <div className="p-4 rounded-2xl bg-white/5 border border-white/10 text-center flex flex-col justify-center">
-                <p className="text-xs uppercase text-gray-400 font-bold">Est. Set Weight</p>
-                <p className="text-2xl font-black text-white mt-1 font-mono">{cameraExercise.defaultWeightKg} kg</p>
-              </div>
-            </div>
-
-            {/* Instruction Banner */}
-            <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl text-xs text-purple-200 text-left">
-              <strong className="text-purple-300">Form Checklist:</strong>
-              <ul className="list-disc list-inside mt-1 space-y-0.5 text-[11px]">
-                <li>Keep dumbbell path straight.</li>
-                <li>Maintain a steady, slow concentric motion.</li>
-              </ul>
-            </div>
-
-            {/* Action Save button */}
-            <div className="mt-4">
-              <button
-                onClick={handleSaveCameraSession}
-                className="w-full py-3.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-sm shadow-lg shadow-purple-600/30 transition-all text-center"
-              >
-                💾 Log AI Workout ({simulatedReps} Reps)
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }
