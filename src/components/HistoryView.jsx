@@ -1,6 +1,130 @@
 import React, { useState, useEffect } from 'react';
 import { exercises } from '../data/exercises';
 
+const PlusIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', marginRight: '4px', verticalAlign: 'middle' }}>
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+);
+
+const DumbbellCurlIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary)', flexShrink: 0 }}>
+    <rect x="3" y="6" width="4" height="12" rx="1.5" fill="currentColor" opacity="0.8" />
+    <rect x="7" y="9" width="2" height="6" rx="0.5" fill="currentColor" />
+    <line x1="9" y1="12" x2="15" y2="12" stroke="currentColor" strokeWidth="3" />
+    <rect x="15" y="9" width="2" height="6" rx="0.5" fill="currentColor" />
+    <rect x="17" y="6" width="4" height="12" rx="1.5" fill="currentColor" opacity="0.8" />
+  </svg>
+);
+
+const DeadliftBarbellIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--secondary)', flexShrink: 0 }}>
+    <line x1="2" y1="19" x2="22" y2="19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    <line x1="4" y1="13" x2="20" y2="13" stroke="currentColor" strokeWidth="2.5" />
+    <rect x="5" y="7" width="2" height="12" rx="1" fill="currentColor" />
+    <rect x="7" y="5" width="2" height="16" rx="1" fill="currentColor" opacity="0.9" />
+    <rect x="15" y="5" width="2" height="16" rx="1" fill="currentColor" opacity="0.9" />
+    <rect x="17" y="7" width="2" height="12" rx="1" fill="currentColor" />
+  </svg>
+);
+
+const ExerciseHistoryGraph = ({ logs }) => {
+  if (!logs || logs.length < 2) {
+    return (
+      <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textAlign: 'center', padding: '1.25rem 1rem', background: 'hsla(0,0%,100%,0.02)', borderRadius: '8px', border: '1px dashed var(--border-light)', marginBottom: '1rem' }}>
+        Log at least 2 sessions to display trend graph.
+      </div>
+    );
+  }
+
+  const chronLogs = [...logs].reverse();
+  
+  const weights = chronLogs.map(log => Math.max(...log.sets.map(s => s.weight || 0)));
+  const reps = chronLogs.map(log => log.sets.reduce((sum, s) => sum + (s.reps || 0), 0));
+  const intensities = chronLogs.map(log => log.sets.reduce((sum, s) => sum + ((s.weight || 0) * (s.reps || 0)), 0));
+
+  const maxW = Math.max(...weights) || 1;
+  const maxR = Math.max(...reps) || 1;
+  const maxI = Math.max(...intensities) || 1;
+
+  const width = 340;
+  const height = 130;
+  const paddingX = 25;
+  const paddingY = 20;
+
+  const points = chronLogs.map((log, idx) => {
+    const x = paddingX + (idx * (width - 2 * paddingX)) / (chronLogs.length - 1);
+    
+    const wVal = Math.max(...log.sets.map(s => s.weight || 0));
+    const yW = height - paddingY - (wVal / maxW) * (height - 2 * paddingY);
+
+    const rVal = log.sets.reduce((sum, s) => sum + (s.reps || 0), 0);
+    const rawYR = height - paddingY - (rVal / maxR) * (height - 2 * paddingY);
+
+    const iVal = log.sets.reduce((sum, s) => sum + ((s.weight || 0) * (s.reps || 0)), 0);
+    const rawYI = height - paddingY - (iVal / maxI) * (height - 2 * paddingY);
+
+    // Apply minor offset if they overlap exactly to keep both lines visible
+    const overlap = Math.abs(rawYR - rawYI) < 1.5;
+    const yR = overlap ? rawYR - 2.5 : rawYR;
+    const yI = overlap ? rawYI + 2.5 : rawYI;
+
+    return { x, yW, yR, yI };
+  });
+
+  const pathW = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.yW}`).join(' ');
+  const pathR = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.yR}`).join(' ');
+  const pathI = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.yI}`).join(' ');
+
+  return (
+    <div style={{ background: 'hsla(0,0%,0%,0.3)', padding: '12px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-light)', marginBottom: '1.25rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '0.6rem', color: 'var(--text-secondary)', marginBottom: '12px', padding: '0 4px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+            <span style={{ width: '8px', height: '2px', background: 'var(--primary)', display: 'inline-block' }}></span>
+            Weight ({maxW}kg)
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+            <span style={{ width: '8px', height: '2px', background: 'var(--secondary)', display: 'inline-block' }}></span>
+            Reps ({maxR})
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+            <span style={{ width: '8px', height: '2px', background: 'var(--warning)', display: 'inline-block' }}></span>
+            Intensity ({maxI}kg)
+          </span>
+        </div>
+        <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace' }}>{chronLogs.length} logs</span>
+      </div>
+
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} style={{ overflow: 'visible' }}>
+        <line x1={paddingX} y1={paddingY} x2={width - paddingX} y2={paddingY} stroke="rgba(255,255,255,0.02)" strokeWidth="1" strokeDasharray="3 3" />
+        <line x1={paddingX} y1={height - paddingY} x2={width - paddingX} y2={height - paddingY} stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
+
+        <path d={pathW} fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ filter: 'drop-shadow(0 0 3px var(--primary-glow))' }} />
+        <path d={pathR} fill="none" stroke="var(--secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ filter: 'drop-shadow(0 0 3px var(--secondary-glow))' }} />
+        <path d={pathI} fill="none" stroke="var(--warning)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ filter: 'drop-shadow(0 0 3px rgba(245,158,11,0.25))' }} />
+
+        {points.map((p, idx) => (
+          <g key={idx}>
+            <circle cx={p.x} cy={p.yW} r="3" fill="#ffffff" stroke="var(--primary)" strokeWidth="1.5" />
+            <circle cx={p.x} cy={p.yR} r="3" fill="#ffffff" stroke="var(--secondary)" strokeWidth="1.5" />
+            <circle cx={p.x} cy={p.yI} r="3" fill="#ffffff" stroke="var(--warning)" strokeWidth="1.5" />
+          </g>
+        ))}
+      </svg>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', padding: '0 8px' }}>
+        {points.map((p, idx) => (
+          <span key={idx} style={{ fontSize: '0.55rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+            {new Date(chronLogs[idx].date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 export default function HistoryView({ refreshTrigger, onRefresh }) {
   const [history, setHistory] = useState([]);
   const [filterExercise, setFilterExercise] = useState('all');
@@ -120,16 +244,15 @@ export default function HistoryView({ refreshTrigger, onRefresh }) {
       {/* Header Panel */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
         <div>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif' }}>Workout History</h2>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>View your past workout sets & stats</p>
         </div>
         
         <button
           onClick={() => setShowManualLogModal(true)}
           className="btn btn-primary"
-          style={{ width: 'auto', padding: '0.5rem 0.85rem', fontSize: '0.75rem', fontWeight: '700' }}
+          style={{ width: 'auto', padding: '0.5rem 0.85rem', fontSize: '0.75rem', fontWeight: '700', display: 'flex', alignItems: 'center' }}
         >
-          ➕ Add Log
+          <PlusIcon /> Add Log
         </button>
       </div>
 
@@ -167,72 +290,71 @@ export default function HistoryView({ refreshTrigger, onRefresh }) {
           </p>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {filteredHistory.map((log) => {
-            const isExpanded = expandedLogId === log.id;
-            const totalVolume = log.sets.reduce((sum, s) => sum + (s.weight * s.reps), 0);
-            const totalReps = log.sets.reduce((sum, s) => sum + s.reps, 0);
-
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {(filterExercise === 'all' ? exercises : exercises.filter(ex => ex.id === filterExercise)).map((ex) => {
+            const exLogs = history.filter(h => h.exerciseId === ex.id);
             return (
-              <div
-                key={log.id}
-                className="glass-card"
-                style={{ padding: '1rem', cursor: 'pointer' }}
-                onClick={() => setExpandedLogId(isExpanded ? null : log.id)}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '0.25rem' }}>
-                      <span style={{
-                        fontSize: '0.6rem',
-                        fontWeight: '700',
-                        padding: '0.1rem 0.4rem',
-                        borderRadius: 'var(--radius-full)',
-                        background: log.mode === 'AI Camera' ? 'var(--primary-glow)' : 'var(--bg-surface-elevated)',
-                        color: log.mode === 'AI Camera' ? 'var(--primary)' : 'var(--text-secondary)',
-                        border: '1px solid var(--border-light)',
-                        textTransform: 'uppercase'
-                      }}>
-                        {log.mode}
-                      </span>
-                      <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{formatDate(log.date)}</span>
-                    </div>
-
-                    <h3 style={{ fontSize: '0.95rem', fontWeight: '800', color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>
-                      {log.exerciseName}
-                    </h3>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', textAlign: 'right' }}>
-                    <div>
-                      <div style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--secondary)' }}>{log.sets.length} sets</div>
-                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
-                        {totalReps} reps • {totalVolume} kg
-                      </div>
-                    </div>
-                    <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{isExpanded ? '▲' : '▼'}</span>
-                  </div>
+              <div key={ex.id} className="glass-card" style={{ padding: '1.25rem' }}>
+                {/* Category tag */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                  <span style={{
+                    fontSize: '0.65rem',
+                    fontWeight: '700',
+                    padding: '0.15rem 0.5rem',
+                    borderRadius: 'var(--radius-full)',
+                    background: 'var(--primary-glow)',
+                    color: 'var(--primary)',
+                    border: '1px solid hsla(var(--h-primary), 85%, 62%, 0.3)',
+                    textTransform: 'uppercase'
+                  }}>
+                    {ex.category}
+                  </span>
                 </div>
 
-                {/* Expanded set breakdown */}
-                {isExpanded && (
-                  <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-light)' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', fontSize: '0.65rem', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '0.35rem', textAlign: 'center' }}>
-                      <span>SET</span>
-                      <span>WEIGHT</span>
-                      <span>REPS</span>
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                      {log.sets.map((s) => (
-                        <div key={s.setId} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', fontSize: '0.75rem', padding: '0.35rem', borderRadius: '4px', background: 'hsla(0, 0%, 100%, 0.02)', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                          <span style={{ fontWeight: '700' }}>#{s.setId}</span>
-                          <span>{s.weight} kg</span>
-                          <span>{s.reps} reps</span>
+                {/* Title & Icon */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                  {ex.id === 'dumbbell-hammer-curl' ? <DumbbellCurlIcon /> : <DeadliftBarbellIcon />}
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)', margin: 0 }}>
+                    {ex.name}
+                  </h3>
+                </div>
+
+                {/* Graph Trend */}
+                <ExerciseHistoryGraph logs={exLogs} />
+
+                {/* Session breakdown list */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '150px', overflowY: 'auto', borderTop: '1px solid var(--border-light)', paddingTop: '0.75rem' }}>
+                  {exLogs.length === 0 ? (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', padding: '0.5rem' }}>No sessions logged yet</div>
+                  ) : (
+                    exLogs.map((log) => {
+                      const totalReps = log.sets.reduce((sum, s) => sum + s.reps, 0);
+                      const maxWeight = Math.max(...log.sets.map(s => s.weight || 0));
+                      return (
+                        <div key={log.id} style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '0.5rem 0.75rem',
+                          background: 'hsla(0, 0%, 100%, 0.02)',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px solid var(--border-light)',
+                          fontSize: '0.75rem'
+                        }}>
+                          <div>
+                            <span style={{ fontSize: '0.6rem', padding: '0.1rem 0.35rem', borderRadius: '4px', background: log.mode === 'AI Camera' ? 'var(--primary-glow)' : 'var(--bg-surface-elevated)', color: log.mode === 'AI Camera' ? 'var(--primary)' : 'var(--text-secondary)', marginRight: '6px', fontWeight: '700' }}>
+                              {log.mode}
+                            </span>
+                            <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace' }}>{formatDate(log.date)}</span>
+                          </div>
+                          <div style={{ fontWeight: '700', color: 'var(--text-primary)', textAlign: 'right' }}>
+                            {maxWeight}kg • {totalReps}r • {log.durationSec}s
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                      );
+                    })
+                  )}
+                </div>
               </div>
             );
           })}

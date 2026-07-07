@@ -1,6 +1,64 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { exercises } from '../data/exercises';
 
+const DumbbellCurlIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary)', flexShrink: 0 }}>
+    <rect x="3" y="6" width="4" height="12" rx="1.5" fill="currentColor" opacity="0.8" />
+    <rect x="7" y="9" width="2" height="6" rx="0.5" fill="currentColor" />
+    <line x1="9" y1="12" x2="15" y2="12" stroke="currentColor" strokeWidth="3" />
+    <rect x="15" y="9" width="2" height="6" rx="0.5" fill="currentColor" />
+    <rect x="17" y="6" width="4" height="12" rx="1.5" fill="currentColor" opacity="0.8" />
+  </svg>
+);
+
+const DeadliftBarbellIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--secondary)', flexShrink: 0 }}>
+    <line x1="2" y1="19" x2="22" y2="19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    <line x1="4" y1="13" x2="20" y2="13" stroke="currentColor" strokeWidth="2.5" />
+    <rect x="5" y="7" width="2" height="12" rx="1" fill="currentColor" />
+    <rect x="7" y="5" width="2" height="16" rx="1" fill="currentColor" opacity="0.9" />
+    <rect x="15" y="5" width="2" height="16" rx="1" fill="currentColor" opacity="0.9" />
+    <rect x="17" y="7" width="2" height="12" rx="1" fill="currentColor" />
+  </svg>
+);
+
+const InfoIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary)', marginRight: '4px', verticalAlign: 'middle', display: 'inline-block' }}>
+    <circle cx="12" cy="12" r="10" />
+    <line x1="12" y1="16" x2="12" y2="12" />
+    <line x1="12" y1="8" x2="12.01" y2="8" />
+  </svg>
+);
+
+const PenIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: '4px' }}>
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+  </svg>
+);
+
+const CameraIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: '4px' }}>
+    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+    <circle cx="12" cy="13" r="4" />
+  </svg>
+);
+
+const ClockIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', marginRight: '4px', verticalAlign: 'middle' }}>
+    <circle cx="12" cy="12" r="10" />
+    <polyline points="12 6 12 12 16 14" />
+  </svg>
+);
+
+const SaveIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', marginRight: '4px', verticalAlign: 'middle' }}>
+    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+    <polyline points="17 21 17 13 7 13 7 21" />
+    <polyline points="7 3 7 8 15 8" />
+  </svg>
+);
+
 export default function DashboardScreen({ onNavigate, refreshTrigger, onSelectExercise }) {
   const [selectedExercise, setSelectedExercise] = useState(null);
   const [activeSession, setActiveSession] = useState(null);
@@ -101,9 +159,6 @@ export default function DashboardScreen({ onNavigate, refreshTrigger, onSelectEx
       {/* Exercises List Hub */}
       {!activeSession && (
         <>
-          <h2 style={{ fontSize: '1rem', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '0.75rem', fontWeight: '700' }}>
-            Select Training Movement
-          </h2>
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {exercises.map((ex) => {
@@ -130,12 +185,14 @@ export default function DashboardScreen({ onNavigate, refreshTrigger, onSelectEx
                     }}>
                       {ex.category}
                     </span>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{ex.difficulty}</span>
                   </div>
 
-                  <h3 style={{ fontSize: '1.2rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
-                    {ex.name}
-                  </h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                    {ex.id === 'dumbbell-hammer-curl' ? <DumbbellCurlIcon /> : <DeadliftBarbellIcon />}
+                    <h3 style={{ fontSize: '1.2rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)', margin: 0 }}>
+                      {ex.name}
+                    </h3>
+                  </div>
                   
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: '140%', marginBottom: '1rem' }}>
                     {ex.description}
@@ -161,7 +218,7 @@ export default function DashboardScreen({ onNavigate, refreshTrigger, onSelectEx
 
           <div className="glass-card" style={{ marginTop: '1rem', background: 'var(--primary-glow)', borderColor: 'hsla(var(--h-primary), 85%, 62%, 0.25)', textAlign: 'center', padding: '1rem' }}>
             <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: '140%' }}>
-              💡 <strong>How it works:</strong> Click on a training card to view posture instructions, log sets manually, or launch the live camera to track your bone positions and angles!
+              <InfoIcon /> <strong>How it works:</strong> Click on a training card to view posture instructions, log sets manually, or launch the live camera to track your bone positions and angles!
             </p>
           </div>
         </>
@@ -247,7 +304,7 @@ export default function DashboardScreen({ onNavigate, refreshTrigger, onSelectEx
                 className="btn btn-secondary"
                 style={{ padding: '0.75rem' }}
               >
-                📝 Manual Log
+                <PenIcon /> Manual Log
               </button>
               <button
                 onClick={() => {
@@ -258,7 +315,7 @@ export default function DashboardScreen({ onNavigate, refreshTrigger, onSelectEx
                 className="btn btn-primary"
                 style={{ padding: '0.75rem' }}
               >
-                📷 Start Live AI
+                <CameraIcon /> Start Live AI
               </button>
             </div>
           </div>
@@ -283,9 +340,11 @@ export default function DashboardScreen({ onNavigate, refreshTrigger, onSelectEx
               borderRadius: 'var(--radius-sm)',
               fontSize: '1rem',
               fontWeight: '700',
-              fontFamily: 'monospace'
+              fontFamily: 'monospace',
+              display: 'flex',
+              alignItems: 'center'
             }}>
-              ⏱️ {formatTime(sessionTimer)}
+              <ClockIcon /> {formatTime(sessionTimer)}
             </div>
           </div>
 
@@ -389,7 +448,7 @@ export default function DashboardScreen({ onNavigate, refreshTrigger, onSelectEx
               className="btn btn-primary"
               style={{ padding: '0.85rem' }}
             >
-              💾 Save Session & Log
+              <SaveIcon /> Save Session & Log
             </button>
             <button
               onClick={() => {

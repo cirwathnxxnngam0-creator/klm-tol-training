@@ -1,13 +1,49 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { exercises } from '../data/exercises';
 
+const LightningIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary)', display: 'inline-block' }}>
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="currentColor"/>
+  </svg>
+);
+
+const ClockIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block' }}>
+    <circle cx="12" cy="12" r="10"/>
+    <polyline points="12 6 12 12 16 14"/>
+  </svg>
+);
+
+const DumbbellIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary)', display: 'inline-block' }}>
+    <path d="M6.5 6.5h11M6.5 17.5h11M3 12h18M3 8v8M21 8v8M6.5 6.5v11M17.5 6.5v11"/>
+  </svg>
+);
+
+const BrainIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary)', display: 'inline-block' }}>
+    <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1 0-3.12 3 3 0 0 1 0-3.88 2.5 2.5 0 0 1 0-3.12A2.5 2.5 0 0 1 9.5 2z"/>
+    <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 0-3.12 3 3 0 0 0 0-3.88 2.5 2.5 0 0 0 0-3.12A2.5 2.5 0 0 0 14.5 2z"/>
+  </svg>
+);
+
+const PlayIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ marginLeft: '2.5px', display: 'inline-block' }}>
+    <polygon points="5 3 19 12 5 21 5 3"/>
+  </svg>
+);
+
+const StopIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style={{ display: 'inline-block' }}>
+    <rect x="4" y="4" width="16" height="16" rx="2"/>
+  </svg>
+);
+
 export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, setSelectedExerciseId: propSetExerciseId }) {
   const [localExerciseId, setLocalExerciseId] = useState('dumbbell-hammer-curl');
   const selectedExerciseId = propExerciseId || localExerciseId;
   const setSelectedExerciseId = propSetExerciseId || setLocalExerciseId;
-  const [isCameraActive, setIsCameraActive] = useState(false);
-  const [isSimulating, setIsSimulating] = useState(true);
-  const [simulatePoorForm, setSimulatePoorForm] = useState(false);
+  const [isCameraActive, setIsCameraActive] = useState(true); // Default to true to auto-start camera
   
   // CDN Load Status
   const [mpStatus, setMpStatus] = useState('idle'); // 'idle' | 'loading' | 'loaded' | 'error'
@@ -26,6 +62,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
 
   // Exercise rep & state tracking
   const [repCount, setRepCount] = useState(0);
+  const [sessionWeight, setSessionWeight] = useState(10);
   const [formFeedback, setFormFeedback] = useState({ status: 'good', message: 'Model initializing...' });
   const [currentPrimaryAngle, setCurrentPrimaryAngle] = useState(0);
   const [currentSecondaryAngle, setCurrentSecondaryAngle] = useState(0);
@@ -39,6 +76,26 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
   const requestRef = useRef(null);
 
   const activeExercise = exercises.find(e => e.id === selectedExerciseId) || exercises[0];
+
+  // Sync weight input when exercise changes (query personal record weight from history)
+  useEffect(() => {
+    if (activeExercise) {
+      try {
+        const history = JSON.parse(localStorage.getItem('workout_history') || '[]');
+        const exLogs = history.filter(h => h.exerciseId === activeExercise.id);
+        if (exLogs.length > 0) {
+          const prWeight = Math.max(...exLogs.flatMap(log => log.sets.map(s => Number(s.weight) || 0)));
+          if (prWeight > 0) {
+            setSessionWeight(prWeight);
+            return;
+          }
+        }
+      } catch (e) {
+        console.error('Error fetching personal record for camera weight default', e);
+      }
+      setSessionWeight(activeExercise.defaultWeightKg);
+    }
+  }, [selectedExerciseId, activeExercise]);
 
   // Dynamic CDN Loader for MediaPipe Pose
   useEffect(() => {
@@ -122,7 +179,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
   useEffect(() => {
     let stream = null;
     async function startCamera() {
-      if (isCameraActive && !isSimulating) {
+      if (isCameraActive) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             video: { width: 640, height: 480, facingMode: 'user' },
@@ -134,13 +191,12 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
           }
         } catch (err) {
           console.error("Failed to access webcam:", err);
-          alert("Could not access camera. Switched to Simulation Mode.");
-          setIsSimulating(true);
+          alert("Could not access camera. Please check your camera permissions.");
         }
       }
     }
 
-    if (isCameraActive && !isSimulating) {
+    if (isCameraActive) {
       startCamera();
     } else {
       if (videoRef.current && videoRef.current.srcObject) {
@@ -155,14 +211,14 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [isCameraActive, isSimulating]);
+  }, [isCameraActive]);
 
   // Video processing frame loop for MediaPipe
   useEffect(() => {
     let active = true;
     const processFrame = async () => {
       if (!active) return;
-      if (isCameraActive && !isSimulating && mpStatus === 'loaded' && videoRef.current && poseInstanceRef.current) {
+      if (isCameraActive && mpStatus === 'loaded' && videoRef.current && poseInstanceRef.current) {
         if (videoRef.current.readyState >= 2) {
           try {
             await poseInstanceRef.current.send({ image: videoRef.current });
@@ -174,7 +230,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
       requestRef.current = requestAnimationFrame(processFrame);
     };
 
-    if (isCameraActive && !isSimulating && mpStatus === 'loaded') {
+    if (isCameraActive && mpStatus === 'loaded') {
       requestRef.current = requestAnimationFrame(processFrame);
     }
 
@@ -184,7 +240,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
         cancelAnimationFrame(requestRef.current);
       }
     };
-  }, [isCameraActive, isSimulating, mpStatus]);
+  }, [isCameraActive, mpStatus]);
 
   // Workout Timer Effect
   useEffect(() => {
@@ -234,8 +290,46 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
     return features;
   };
 
+  // Unified state machine for rep tracking (combines physical angles & AI predictions)
+  const updateRepState = (primAngle, startProb = 0, endProb = 0) => {
+    let isStartPos = false;
+    let isPeakPos = false;
+
+    // Check if AI model is loaded and actively predicting
+    const isAiActive = modelStatus === 'loaded';
+
+    if (selectedExerciseId === 'dumbbell-hammer-curl') {
+      if (isAiActive) {
+        // Stricter check: Require joint angle AND at least 30% AI classification confidence
+        isStartPos = primAngle > 135 && startProb > 0.30;
+        isPeakPos = primAngle < 75 && primAngle > 15 && endProb > 0.30;
+      } else {
+        // Fallback: angles must be in valid ranges (ignoring noise/occlusion 0 deg)
+        isStartPos = primAngle > 135;
+        isPeakPos = primAngle < 75 && primAngle > 15;
+      }
+    } else if (selectedExerciseId === 'dumbbell-deadlift') {
+      if (isAiActive) {
+        // Stricter check: Require joint angle AND at least 30% AI classification confidence
+        isStartPos = primAngle > 150 && startProb > 0.30;
+        isPeakPos = primAngle < 120 && primAngle > 40 && endProb > 0.30;
+      } else {
+        // Fallback: angles must be in valid ranges (ignoring noise/occlusion 0 deg)
+        isStartPos = primAngle > 150;
+        isPeakPos = primAngle < 120 && primAngle > 40;
+      }
+    }
+
+    if (repStateRef.current === 'start' && isPeakPos) {
+      repStateRef.current = 'halfway';
+    } else if (repStateRef.current === 'halfway' && isStartPos) {
+      repStateRef.current = 'start';
+      setRepCount(prev => prev + 1);
+    }
+  };
+
   // Run Real-Time inference using the TF.js model
-  const runAiClassification = async (joints) => {
+  const runAiClassification = async (joints, primAngle) => {
     if (!model || !window.tf) return;
     try {
       const features = extractCocoFeatures(joints);
@@ -260,13 +354,8 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
           setAiStateMessage('Posture check: In motion...');
         }
 
-        // Run rep tracking logic based on neural net classification transitions
-        if (repStateRef.current === 'start' && endProb > 0.75) {
-          repStateRef.current = 'halfway';
-        } else if (repStateRef.current === 'halfway' && startProb > 0.75) {
-          repStateRef.current = 'start';
-          setRepCount(prev => prev + 1);
-        }
+        // Run rep tracking logic using unified state machine
+        updateRepState(primAngle, startProb, endProb);
       }
     } catch (e) {
       console.error("TFJS prediction error:", e);
@@ -275,10 +364,6 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
 
   // Process posture and fallback angle bounds checking
   const evaluatePosture = (joints, side) => {
-    // 1. Run AI Classifier prediction
-    runAiClassification(joints);
-
-    // 2. Perform secondary rule validation for visual skeleton styling checks
     const rules = {
       'dumbbell-deadlift': {
         primary: { jointA: 'shoulder', jointB: 'hip', jointC: 'knee', name: 'Hip Hinge' },
@@ -293,13 +378,21 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
     const exRules = rules[selectedExerciseId] || rules['dumbbell-hammer-curl'];
     
     const getJointPos = (name) => {
-      if (name === 'shoulder') return side === 'left' ? joints[11] : joints[12];
-      if (name === 'elbow') return side === 'left' ? joints[13] : joints[14];
-      if (name === 'wrist') return side === 'left' ? joints[15] : joints[16];
-      if (name === 'hip') return side === 'left' ? joints[23] : joints[24];
-      if (name === 'knee') return side === 'left' ? joints[25] : joints[26];
-      if (name === 'ankle') return side === 'left' ? joints[27] : joints[28];
-      return null;
+      const joint = (() => {
+        if (name === 'shoulder') return side === 'left' ? joints[11] : joints[12];
+        if (name === 'elbow') return side === 'left' ? joints[13] : joints[14];
+        if (name === 'wrist') return side === 'left' ? joints[15] : joints[16];
+        if (name === 'hip') return side === 'left' ? joints[23] : joints[24];
+        if (name === 'knee') return side === 'left' ? joints[25] : joints[26];
+        if (name === 'ankle') return side === 'left' ? joints[27] : joints[28];
+        return null;
+      })();
+      
+      // Filter out points that are not visible or detected with low confidence
+      if (!joint || (joint.visibility !== undefined && joint.visibility < 0.5)) {
+        return null;
+      }
+      return joint;
     };
 
     const jA = getJointPos(exRules.primary.jointA);
@@ -314,7 +407,14 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
     const secAngle = calculateAngle(sA, sB, sC);
     setCurrentSecondaryAngle(secAngle);
 
-    // Provide warning feedback for secondary indicators
+    // 1. Run AI Classifier prediction if model loaded, otherwise run fallback state tracker directly
+    if (model && window.tf) {
+      runAiClassification(joints, primAngle);
+    } else {
+      updateRepState(primAngle, 0, 0);
+    }
+
+    // 2. Perform secondary rule validation for visual skeleton styling checks
     let warning = false;
     let feedback = "Form looking correct. Keep repeating!";
 
@@ -325,7 +425,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
       }
     } else {
       // Deadlift spine check
-      if (simulatePoorForm || secAngle < 140) {
+      if (secAngle < 140) {
         warning = true;
         feedback = "Warning: Neutral spine lost! Straighten your lower back.";
       }
@@ -352,95 +452,6 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
       evaluatePosture(results.poseLandmarks, side);
     }
   };
-
-  // Manual Simulator Mode loop
-  useEffect(() => {
-    let active = true;
-    const simulateLoop = () => {
-      if (!active) return;
-      if (isSimulating) {
-        const canvas = canvasRef.current;
-        if (canvas) {
-          const ctx = canvas.getContext('2d');
-          const w = canvas.width;
-          const h = canvas.height;
-          ctx.clearRect(0, 0, w, h);
-
-          // Calculate progression of the rep
-          const t = Date.now() / 1000;
-          const cycle = 4; // 4 seconds rep
-          const phase = (t % cycle) / cycle;
-          const progress = 0.5 - 0.5 * Math.cos(phase * 2 * Math.PI); // Smooth curve 0 -> 1 -> 0
-
-          // Generate simulated landmarks
-          const landmarks = {};
-          
-          if (selectedExerciseId === 'dumbbell-hammer-curl') {
-            // Right-side coordinates
-            landmarks[12] = { x: 0.45, y: 0.35, visibility: 0.99 }; // Shoulder
-            landmarks[24] = { x: 0.44, y: 0.70, visibility: 0.99 }; // Hip
-
-            // If poor form, swing elbow
-            const elbowSwingX = simulatePoorForm ? 0.08 * progress : 0;
-            const elbowSwingY = simulatePoorForm ? -0.04 * progress : 0;
-            landmarks[14] = { x: 0.45 + elbowSwingX, y: 0.50 + elbowSwingY, visibility: 0.99 }; // Elbow
-
-            const targetA = 160 - 120 * progress;
-            const angleRad = ((180 - targetA) * Math.PI) / 180;
-            landmarks[16] = {
-              x: landmarks[14].x + 0.16 * Math.sin(angleRad),
-              y: landmarks[14].y + 0.16 * Math.cos(angleRad),
-              visibility: 0.99
-            };
-          } else {
-            // Deadlift
-            landmarks[28] = { x: 0.45, y: 0.85, visibility: 0.99 }; // Ankle
-            landmarks[26] = { 
-              x: 0.43 + 0.03 * progress, 
-              y: 0.65 + 0.05 * progress, 
-              visibility: 0.99 
-            };
-            landmarks[24] = { 
-              x: 0.47 - 0.05 * progress, 
-              y: 0.52 + 0.18 * progress, 
-              visibility: 0.99 
-            };
-            // Back rounding simulation
-            const backRound = simulatePoorForm ? 0.15 * progress : 0.03 * progress;
-            landmarks[12] = { 
-              x: landmarks[24].x + 0.02 - backRound, 
-              y: 0.24 + 0.20 * progress, 
-              visibility: 0.99 
-            };
-            landmarks[14] = { x: landmarks[12].x + 0.01, y: landmarks[12].y + 0.15, visibility: 0.99 }; // Elbow
-            landmarks[16] = { x: landmarks[14].x, y: landmarks[14].y + 0.15, visibility: 0.99 }; // Wrist
-          }
-
-          // Fill standard points so classifier doesn't crash on null points
-          cocoMapping.forEach(idx => {
-            if (!landmarks[idx]) {
-              landmarks[idx] = { x: 0.4, y: 0.3, visibility: 0.8 };
-            }
-          });
-
-          drawPose(ctx, landmarks, 'right', w, h);
-          evaluatePosture(landmarks, 'right');
-        }
-      }
-      requestRef.current = requestAnimationFrame(simulateLoop);
-    };
-
-    if (isSimulating) {
-      requestRef.current = requestAnimationFrame(simulateLoop);
-    }
-
-    return () => {
-      active = false;
-      if (requestRef.current) {
-        cancelAnimationFrame(requestRef.current);
-      }
-    };
-  }, [isSimulating, selectedExerciseId, simulatePoorForm]);
 
   // Determine which side of user body faces the camera
   const getBestSide = (joints) => {
@@ -537,7 +548,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
       date: new Date().toISOString(),
       durationSec: timerTime,
       sets: [
-        { setId: 1, weight: activeExercise.defaultWeightKg, reps: repCount, completed: true }
+        { setId: 1, weight: Number(sessionWeight) || 0, reps: repCount, completed: true }
       ],
       mode: 'AI Camera'
     };
@@ -553,241 +564,344 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
   };
 
   return (
-    <div className="container fade-in" style={{ paddingBottom: '3rem' }}>
-      {/* Exercise Picker */}
-      <div className="glass-card" style={{ marginBottom: '1rem' }}>
-        <h3 style={{ fontSize: '1rem', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-          Select Training Movement
-        </h3>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-          {exercises.map(ex => (
-            <button
-              key={ex.id}
-              className={`btn ${selectedExerciseId === ex.id ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ fontSize: '0.8rem', padding: '0.6rem 0.5rem' }}
-              onClick={() => {
-                setSelectedExerciseId(ex.id);
-                setRepCount(0);
-                repStateRef.current = 'start';
-              }}
-            >
-              {ex.name}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Camera / Simulation Container */}
-      <div className="glass-card" style={{ padding: '0.5rem', overflow: 'hidden', position: 'relative' }}>
-        <div style={{
-          position: 'relative',
-          width: '100%',
-          aspectRatio: '4/3',
-          backgroundColor: 'hsl(240, 16%, 4%)',
-          borderRadius: 'var(--radius-sm)',
+    <div className="fade-in" style={{ width: '100%', height: 'calc(100vh - 64px)', position: 'relative', overflow: 'hidden', background: '#09090b', display: 'flex', flexDirection: 'column' }}>
+      {/* Full screen Webcam / AI Tracking Container */}
+      <div 
+        style={{ 
+          flex: 1,
+          width: '100%', 
+          height: '100%',
+          position: 'relative', 
           overflow: 'hidden',
-          border: '1px solid var(--border-light)'
-        }}>
-          {isCameraActive && !isSimulating ? (
-            <video
-              ref={videoRef}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              playsInline
-              muted
-            />
-          ) : (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              textAlign: 'center',
-              color: 'var(--text-muted)'
-            }}>
-              <span style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>
-                {isSimulating ? '🤖' : '📷'}
-              </span>
-              <div style={{ fontWeight: '700', color: 'var(--text-primary)' }}>
-                {isSimulating ? 'Skeletal Simulator Active' : 'Camera Feed Offline'}
-              </div>
-              <p style={{ fontSize: '0.75rem', maxWidth: '240px', marginTop: '0.25rem' }}>
-                {isSimulating ? 'Generating simulated joint movements...' : 'Turn on camera below to align pose.'}
-              </p>
-            </div>
-          )}
-
-          {/* Glowing Canvas Overlay */}
-          <canvas
-            ref={canvasRef}
-            width={640}
-            height={480}
-            style={{
+          background: '#09090b'
+        }}
+      >
+        {/* Real Webcam Element */}
+        {isCameraActive ? (
+          <video
+            ref={videoRef}
+            style={{ 
               position: 'absolute',
               top: 0,
               left: 0,
-              width: '100%',
-              height: '100%',
-              pointerEvents: 'none'
+              width: '100%', 
+              height: '100%', 
+              objectFit: 'contain',
+              zIndex: 1
             }}
+            playsInline
+            muted
           />
-
-          {/* Floating Form Warning Indicator */}
-          <div style={{
-            position: 'absolute',
-            bottom: '12px',
-            left: '12px',
-            right: '12px',
-            padding: '0.65rem 0.85rem',
-            borderRadius: 'var(--radius-sm)',
-            background: 'hsla(240, 16%, 6%, 0.85)',
-            backdropFilter: 'blur(8px)',
-            borderLeft: formFeedback.status === 'warning' ? '3px solid var(--danger)' : '3px solid var(--success)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            fontSize: '0.75rem',
-            color: 'var(--text-primary)'
-          }}>
-            <span style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              backgroundColor: formFeedback.status === 'warning' ? 'var(--danger)' : 'var(--success)'
-            }}></span>
-            <span style={{ fontWeight: '600' }}>{formFeedback.message}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Control Actions Panel */}
-      <div className="glass-card" style={{ marginTop: '1rem' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
-          <button
-            className={`btn ${isCameraActive ? 'btn-secondary' : 'btn-primary'}`}
-            onClick={() => {
-              setIsCameraActive(prev => !prev);
-              if (isCameraActive) setIsSimulating(true);
-            }}
-          >
-            {isCameraActive ? '🚫 Stop Tracker' : '📷 Start Camera'}
-          </button>
-
-          <button
-            className="btn btn-secondary"
-            onClick={() => setIsSimulating(prev => !prev)}
-            disabled={!isCameraActive}
-            style={{ opacity: isCameraActive ? 1 : 0.5 }}
-          >
-            {isSimulating ? '🔄 Mode: Webcam' : '🔄 Mode: Simulate'}
-          </button>
-        </div>
-
-        {/* Poor Form Simulator Checkbox (for testing warnings) */}
-        {isSimulating && (
+        ) : (
           <div style={{
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
-            gap: '0.5rem',
-            marginBottom: '1rem',
-            padding: '0.5rem 0.75rem',
-            background: 'hsla(0, 0%, 100%, 0.03)',
-            borderRadius: 'var(--radius-sm)',
-            border: '1px dashed var(--border-light)'
+            justifyContent: 'center',
+            height: '100%',
+            color: 'var(--text-muted)',
+            zIndex: 1
           }}>
-            <input
-              type="checkbox"
-              id="poorFormSim"
-              checked={simulatePoorForm}
-              onChange={(e) => setSimulatePoorForm(e.target.checked)}
-              style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: 'var(--primary)' }}
-            />
-            <label htmlFor="poorFormSim" style={{ fontSize: '0.75rem', cursor: 'pointer', color: 'var(--text-secondary)' }}>
-              ⚠️ Simulate Rounded Back / Elbow Sway (Test Warnings)
-            </label>
+            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)' }}>
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <circle cx="12" cy="13" r="4" />
+              </svg>
+            </span>
+            <div style={{ fontWeight: '700', color: 'var(--text-primary)', marginTop: '0.75rem' }}>Camera Feed Offline</div>
+            <p style={{ fontSize: '0.75rem', maxWidth: '240px', marginTop: '0.25rem', textAlign: 'center' }}>
+              Preparing pose detection engine...
+            </p>
           </div>
         )}
 
-        {/* Real-time Statistics Grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1.25rem' }}>
-          <div style={{
-            background: 'hsla(0, 0%, 100%, 0.02)',
-            border: '1px solid var(--border-light)',
-            padding: '0.75rem',
-            borderRadius: 'var(--radius-sm)',
-            textAlign: 'center'
-          }}>
-            <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Timer</div>
-            <div style={{ fontSize: '1.5rem', fontWeight: '800', fontFamily: 'monospace', color: 'var(--text-primary)', marginTop: '0.25rem' }}>
-              {formatTime(timerTime)}
-            </div>
-          </div>
+        {/* Glowing Canvas Overlay */}
+        <canvas
+          ref={canvasRef}
+          width={640}
+          height={480}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+            pointerEvents: 'none',
+            zIndex: 2
+          }}
+        />
 
-          <div style={{
-            background: 'hsla(0, 0%, 100%, 0.02)',
-            border: '1px solid var(--border-light)',
-            padding: '0.75rem',
-            borderRadius: 'var(--radius-sm)',
-            textAlign: 'center'
-          }}>
-            <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Rep Counter</div>
-            <div style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--primary)', marginTop: '0.25rem' }}>
-              {repCount}
-            </div>
-          </div>
-        </div>
-
-        {/* Neural Network Model Output Gauges */}
+        {/* ==================== CAMERA ASPECT GRADIENTS ==================== */}
         <div style={{
-          background: 'hsla(var(--h-primary), 85%, 62%, 0.03)',
-          border: '1px solid hsla(var(--h-primary), 85%, 62%, 0.15)',
-          padding: '0.85rem',
-          borderRadius: 'var(--radius-sm)',
-          marginBottom: '1.25rem'
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: '100px',
+          background: 'linear-gradient(to bottom, rgba(9, 9, 11, 0.95) 0%, rgba(9, 9, 11, 0.4) 60%, transparent 100%)',
+          pointerEvents: 'none',
+          zIndex: 3
+        }} />
+
+        <div style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: '160px',
+          background: 'linear-gradient(to top, rgba(9, 9, 11, 0.95) 0%, rgba(9, 9, 11, 0.4) 60%, transparent 100%)',
+          pointerEvents: 'none',
+          zIndex: 3
+        }} />
+
+        {/* ==================== FLOATING OVERLAYS ==================== */}
+
+        {/* 1. TOP BAR OVERLAY: Exercise Selector & Weight Input */}
+        <div style={{
+          position: 'absolute',
+          top: '12px',
+          left: '12px',
+          right: '12px',
+          zIndex: 10,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          background: 'rgba(13, 13, 13, 0.75)',
+          backdropFilter: 'blur(12px) saturate(180%)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: 'var(--radius-md)',
+          padding: '8px 12px',
+          boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.3)'
         }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-primary)' }}>🤖 AI Classifier Output</span>
-            <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem', borderRadius: '4px', background: 'var(--primary-glow)', color: 'var(--primary)', fontWeight: '700' }}>
-              {modelStatus === 'loaded' ? 'TF.js Active' : 'Loading Model...'}
-            </span>
+          {/* Exercise Dropdown */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <LightningIcon />
+            <select
+              value={selectedExerciseId}
+              onChange={(e) => {
+                setSelectedExerciseId(e.target.value);
+                setRepCount(0);
+                repStateRef.current = 'start';
+              }}
+              disabled={timerActive}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-primary)',
+                fontSize: '0.85rem',
+                fontWeight: '800',
+                fontFamily: 'Outfit, sans-serif',
+                outline: 'none',
+                cursor: 'pointer',
+                opacity: timerActive ? 0.7 : 1
+              }}
+            >
+              {exercises.map(ex => (
+                <option key={ex.id} value={ex.id} style={{ background: '#121212', color: '#ffffff' }}>
+                  {ex.name}
+                </option>
+              ))}
+            </select>
           </div>
 
-          {/* Custom gauge lines */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
-                <span>Start Pose Probability</span>
-                <span style={{ fontWeight: '700' }}>{Math.round(predictionOutput.start * 100)}%</span>
-              </div>
-              <div style={{ height: '4px', background: 'var(--bg-surface-elevated)', borderRadius: '2px', overflow: 'hidden' }}>
-                <div style={{ height: '100%', background: 'var(--primary)', width: `${predictionOutput.start * 100}%`, transition: 'width 0.15s ease-out' }}></div>
-              </div>
-            </div>
-
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
-                <span>Peak Contract Probability</span>
-                <span style={{ fontWeight: '700' }}>{Math.round(predictionOutput.end * 100)}%</span>
-              </div>
-              <div style={{ height: '4px', background: 'var(--bg-surface-elevated)', borderRadius: '2px', overflow: 'hidden' }}>
-                <div style={{ height: '100%', background: 'var(--secondary)', width: `${predictionOutput.end * 100}%`, transition: 'width 0.15s ease-out' }}></div>
-              </div>
-            </div>
-          </div>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.5rem', fontStyle: 'italic', textAlign: 'center' }}>
-            "{aiStateMessage}"
+          {/* Weight Selection (The Wait) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.05em' }}>Weight:</span>
+            <input
+              type="number"
+              value={sessionWeight}
+              onChange={(e) => setSessionWeight(Math.max(0, parseFloat(e.target.value) || 0))}
+              disabled={timerActive}
+              style={{
+                width: '38px',
+                background: 'transparent',
+                border: 'none',
+                borderBottom: timerActive ? 'none' : '1px solid rgba(255, 255, 255, 0.3)',
+                color: 'var(--text-primary)',
+                fontSize: '0.85rem',
+                fontWeight: '800',
+                textAlign: 'center',
+                outline: 'none',
+                padding: '1px 0',
+                opacity: timerActive ? 0.7 : 1
+              }}
+            />
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: '700' }}>kg</span>
           </div>
         </div>
 
-        {/* Workout Control Actions */}
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
+        {/* 2. FLOATING STATS PILL (Top-Left, below top bar): Timer & Rep Counter */}
+        <div style={{
+          position: 'absolute',
+          top: '64px',
+          left: '12px',
+          zIndex: 10,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          background: 'rgba(13, 13, 13, 0.75)',
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          padding: '6px 12px',
+          borderRadius: 'var(--radius-full)',
+          fontSize: '0.75rem',
+          fontWeight: '700',
+          color: 'var(--text-primary)',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.2)'
+        }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <ClockIcon />
+            <span style={{ fontFamily: 'monospace' }}>{formatTime(timerTime)}</span>
+          </span>
+          <div style={{ width: '1px', height: '10px', background: 'rgba(255, 255, 255, 0.15)' }}></div>
+          <span style={{ color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <DumbbellIcon />
+            <span>{repCount} reps</span>
+          </span>
+        </div>
+
+        {/* 3. AI MODEL HUD (Top-Right, below top bar): Classification Probability Gauges */}
+        <div style={{
+          position: 'absolute',
+          top: '64px',
+          right: '12px',
+          zIndex: 10,
+          background: 'rgba(13, 13, 13, 0.75)',
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          padding: '8px 10px',
+          borderRadius: 'var(--radius-md)',
+          width: '120px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '4px',
+          fontSize: '0.6rem',
+          color: 'var(--text-secondary)',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.2)'
+        }}>
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center', marginBottom: '2px' }}>
+            <BrainIcon />
+            <span style={{ fontWeight: '700', fontSize: '0.6rem', color: 'var(--text-primary)' }}>AI MODEL</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>START POSE:</span>
+            <span style={{ fontWeight: '800', color: 'var(--primary)' }}>{Math.round(predictionOutput.start * 100)}%</span>
+          </div>
+          <div style={{ height: '3px', background: 'rgba(255,255,255,0.05)', borderRadius: '1.5px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', background: 'var(--primary)', width: `${predictionOutput.start * 100}%`, transition: 'width 0.15s ease-out' }}></div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
+            <span>PEAK POSE:</span>
+            <span style={{ fontWeight: '800', color: 'var(--secondary)' }}>{Math.round(predictionOutput.end * 100)}%</span>
+          </div>
+          <div style={{ height: '3px', background: 'rgba(255,255,255,0.05)', borderRadius: '1.5px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', background: 'var(--secondary)', width: `${predictionOutput.end * 100}%`, transition: 'width 0.15s ease-out' }}></div>
+          </div>
+        </div>
+
+        {/* 4. ONLY TEXT ON THE BOTTOM: Posture Warnings & AI State Message */}
+        <div style={{
+          position: 'absolute',
+          bottom: '92px',
+          left: '12px',
+          right: '12px',
+          zIndex: 10,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '4px',
+          textAlign: 'center',
+          pointerEvents: 'none'
+        }}>
+          {/* Posture Warning Text */}
+          <div style={{
+            color: formFeedback.status === 'warning' ? '#EF4444' : '#10B981',
+            fontSize: '1rem',
+            fontWeight: '900',
+            textTransform: 'uppercase',
+            letterSpacing: '0.04em',
+            textShadow: '0 2px 8px rgba(0,0,0,0.95)',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            background: formFeedback.status === 'warning' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.05)',
+            backdropFilter: 'blur(4px)'
+          }}>
+            {formFeedback.message}
+          </div>
+          
+          {/* Active AI Status Text */}
+          <div style={{
+            color: 'rgba(255, 255, 255, 0.75)',
+            fontSize: '0.75rem',
+            fontWeight: '600',
+            textShadow: '0 1px 4px rgba(0,0,0,0.9)'
+          }}>
+            {aiStateMessage}
+          </div>
+        </div>
+
+        {/* 5. BIG START BUTTON IN LOWER CENTER */}
+        <div style={{
+          position: 'absolute',
+          bottom: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 10
+        }}>
           {!timerActive ? (
-            <button className="btn btn-primary" style={{ width: '100%' }} onClick={handleStartSession}>
-              ⚡ Start Workout Set
+            <button 
+              onClick={handleStartSession}
+              style={{
+                width: '60px',
+                height: '60px',
+                borderRadius: '50%',
+                border: 'none',
+                background: '#ffffff',
+                color: '#09090b',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 20px rgba(255, 255, 255, 0.35), 0 4px 15px rgba(0,0,0,0.5)',
+                transition: 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s',
+                outline: 'none',
+                cursor: 'pointer'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'scale(1.1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+            >
+              <PlayIcon />
             </button>
           ) : (
-            <button className="btn btn-secondary" style={{ width: '100%', background: 'hsla(350, 80%, 55%, 0.15)', color: 'var(--danger)', borderColor: 'hsla(350, 80%, 55%, 0.3)' }} onClick={handleSaveSession}>
-              💾 Stop & Save Set
+            <button 
+              onClick={handleSaveSession}
+              style={{
+                width: '60px',
+                height: '60px',
+                borderRadius: '50%',
+                border: 'none',
+                background: '#EF4444',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 25px rgba(239, 68, 68, 0.6), 0 4px 15px rgba(0,0,0,0.5)',
+                transition: 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s',
+                outline: 'none',
+                cursor: 'pointer'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'scale(1.1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+            >
+              <StopIcon />
             </button>
           )}
         </div>

@@ -59,7 +59,22 @@ export default function AuthScreen({ onAuthSuccess }) {
   return (
     <div className="container fade-in">
       <div className="header">
-        <div className="logo-icon">⚡</div>
+        <div style={{
+          width: '48px',
+          height: '48px',
+          background: 'linear-gradient(135deg, var(--primary), var(--secondary))',
+          borderRadius: 'var(--radius-md)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          margin: '0 auto 1rem',
+          boxShadow: '0 8px 20px var(--primary-glow)',
+          color: '#ffffff',
+        }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="currentColor"/>
+          </svg>
+        </div>
         <h1>FLEXIA</h1>
         <p>Your premium personal wellness companion</p>
       </div>
