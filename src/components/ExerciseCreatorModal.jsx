@@ -62,61 +62,92 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
   ];
 
   // Load MediaPipe Pose
+  // Load MediaPipe Pose (check window first to prevent double-loader issues)
   useEffect(() => {
-    if (cameraActive && mpStatus === 'idle') {
-      setMpStatus('loading');
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js';
-      script.async = true;
-      script.onload = () => {
-        if (window.Pose) {
-          try {
-            const pose = new window.Pose({
-              locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-            });
-            pose.setOptions({
-              modelComplexity: 1,
-              smoothLandmarks: true,
-              enableSegmentation: false,
-              minDetectionConfidence: 0.5,
-              minTrackingConfidence: 0.5
-            });
-            pose.onResults(onPoseResults);
-            poseInstanceRef.current = pose;
-            setMpStatus('loaded');
-          } catch (e) {
-            console.error('Error starting MediaPipe Pose:', e);
-            setMpStatus('error');
-          }
-        } else {
+    if (cameraActive) {
+      if (window.Pose && !poseInstanceRef.current) {
+        try {
+          const pose = new window.Pose({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+          });
+          pose.setOptions({
+            modelComplexity: 1,
+            smoothLandmarks: true,
+            enableSegmentation: false,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+          });
+          pose.onResults(onPoseResults);
+          poseInstanceRef.current = pose;
+          setMpStatus('loaded');
+        } catch (e) {
+          console.error('Error starting cached MediaPipe Pose:', e);
           setMpStatus('error');
         }
-      };
-      script.onerror = () => setMpStatus('error');
-      document.body.appendChild(script);
+        return;
+      }
+
+      if (mpStatus === 'idle') {
+        setMpStatus('loading');
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js';
+        script.async = true;
+        script.onload = () => {
+          if (window.Pose) {
+            try {
+              const pose = new window.Pose({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+              });
+              pose.setOptions({
+                modelComplexity: 1,
+                smoothLandmarks: true,
+                enableSegmentation: false,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+              });
+              pose.onResults(onPoseResults);
+              poseInstanceRef.current = pose;
+              setMpStatus('loaded');
+            } catch (e) {
+              console.error('Error starting MediaPipe Pose:', e);
+              setMpStatus('error');
+            }
+          } else {
+            setMpStatus('error');
+          }
+        };
+        script.onerror = () => setMpStatus('error');
+        document.body.appendChild(script);
+      }
     }
   }, [cameraActive, mpStatus]);
 
-  // Load TensorFlow.js
+  // Load TensorFlow.js (check window first to prevent double-loader issues)
   useEffect(() => {
-    if (cameraActive && tfStatus === 'idle') {
-      setTfStatus('loading');
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0/dist/tf.min.js';
-      script.async = true;
-      script.onload = () => {
-        if (window.tf) {
-          setTfStatus('loaded');
-        } else {
-          setTfStatus('error');
-        }
-      };
-      script.onerror = () => setTfStatus('error');
-      document.body.appendChild(script);
+    if (cameraActive) {
+      if (window.tf) {
+        setTfStatus('loaded');
+        return;
+      }
+      if (tfStatus === 'idle') {
+        setTfStatus('loading');
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0/dist/tf.min.js';
+        script.async = true;
+        script.onload = () => {
+          if (window.tf) {
+            setTfStatus('loaded');
+          } else {
+            setTfStatus('error');
+          }
+        };
+        script.onerror = () => setTfStatus('error');
+        document.body.appendChild(script);
+      }
     }
   }, [cameraActive, tfStatus]);
 
-  // Start video feed
+  // Start video feed webcam
   useEffect(() => {
     let stream = null;
     async function startWebcam() {
@@ -129,7 +160,6 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
             videoRef.current.play();
-            requestRef.current = requestAnimationFrame(processVideoFrame);
           }
         } catch (err) {
           console.error("Webcam access error:", err);
@@ -141,76 +171,91 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
       if (stream) {
         stream.getTracks().forEach(t => t.stop());
       }
+    };
+  }, [cameraActive]);
+
+  // Video processing, canvas rendering, and MediaPipe send loop
+  useEffect(() => {
+    let active = true;
+
+    const renderLoop = async () => {
+      if (!active) return;
+
+      if (videoRef.current && videoRef.current.readyState >= 2) {
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          
+          // Clear canvas
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          
+          // Draw raw camera feed mirrored instantly at 30fps
+          ctx.save();
+          ctx.translate(canvas.width, 0);
+          ctx.scale(-1, 1);
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          ctx.restore();
+
+          // Draw skeleton overlay on top if body coordinates are detected
+          if (currentJointsRawRef.current) {
+            ctx.strokeStyle = 'hsl(142, 85%, 62%)';
+            ctx.lineWidth = 3;
+            
+            const connections = [
+              [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], // Upper body
+              [11, 23], [12, 24], [23, 24], // Torso
+              [23, 25], [24, 26], [25, 27], [26, 28] // Lower body
+            ];
+
+            connections.forEach(([i, j]) => {
+              const p1 = currentJointsRawRef.current[i];
+              const p2 = currentJointsRawRef.current[j];
+              if (p1 && p2 && p1.visibility > 0.5 && p2.visibility > 0.5) {
+                ctx.beginPath();
+                ctx.moveTo(canvas.width - p1.x * canvas.width, p1.y * canvas.height);
+                ctx.lineTo(canvas.width - p2.x * canvas.width, p2.y * canvas.height);
+                ctx.stroke();
+              }
+            });
+
+            currentJointsRawRef.current.forEach((lm) => {
+              if (lm.visibility > 0.5) {
+                ctx.fillStyle = 'var(--text-primary)';
+                ctx.beginPath();
+                ctx.arc(canvas.width - lm.x * canvas.width, lm.y * canvas.height, 4, 0, 2 * Math.PI);
+                ctx.fill();
+              }
+            });
+          }
+        }
+
+        // Process MediaPipe landmarks detection in the background
+        if (poseInstanceRef.current && mpStatus === 'loaded') {
+          try {
+            await poseInstanceRef.current.send({ image: video });
+          } catch (err) {
+            console.error("Frame processing error:", err);
+          }
+        }
+      }
+
+      if (cameraActive) {
+        requestRef.current = requestAnimationFrame(renderLoop);
+      }
+    };
+
+    if (cameraActive) {
+      requestRef.current = requestAnimationFrame(renderLoop);
+    }
+
+    return () => {
+      active = false;
       if (requestRef.current) {
         cancelAnimationFrame(requestRef.current);
       }
     };
-  }, [cameraActive]);
-
-  // Process webcam frame through MediaPipe Pose and render video feed
-  const processVideoFrame = async () => {
-    if (videoRef.current && videoRef.current.readyState === 4) {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const ctx = canvas.getContext('2d');
-        
-        // Clear canvas
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw raw camera feed mirrored instantly at 30fps
-        ctx.save();
-        ctx.translate(canvas.width, 0);
-        ctx.scale(-1, 1);
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        ctx.restore();
-
-        // Draw skeleton overlay on top if body coordinates are detected
-        if (currentJointsRawRef.current) {
-          ctx.strokeStyle = 'hsl(142, 85%, 62%)';
-          ctx.lineWidth = 3;
-          
-          const connections = [
-            [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], // Upper body
-            [11, 23], [12, 24], [23, 24], // Torso
-            [23, 25], [24, 26], [25, 27], [26, 28] // Lower body
-          ];
-
-          connections.forEach(([i, j]) => {
-            const p1 = currentJointsRawRef.current[i];
-            const p2 = currentJointsRawRef.current[j];
-            if (p1 && p2 && p1.visibility > 0.5 && p2.visibility > 0.5) {
-              ctx.beginPath();
-              ctx.moveTo(canvas.width - p1.x * canvas.width, p1.y * canvas.height);
-              ctx.lineTo(canvas.width - p2.x * canvas.width, p2.y * canvas.height);
-              ctx.stroke();
-            }
-          });
-
-          currentJointsRawRef.current.forEach((lm) => {
-            if (lm.visibility > 0.5) {
-              ctx.fillStyle = 'var(--text-primary)';
-              ctx.beginPath();
-              ctx.arc(canvas.width - lm.x * canvas.width, lm.y * canvas.height, 4, 0, 2 * Math.PI);
-              ctx.fill();
-            }
-          });
-        }
-      }
-
-      // Process MediaPipe landmarks detection in the background
-      if (poseInstanceRef.current && mpStatus === 'loaded') {
-        try {
-          await poseInstanceRef.current.send({ image: video });
-        } catch (err) {
-          console.error("Frame processing error:", err);
-        }
-      }
-    }
-    if (cameraActive) {
-      requestRef.current = requestAnimationFrame(processVideoFrame);
-    }
-  };
+  }, [cameraActive, mpStatus]);
 
   const cocoMapping = [0, 2, 5, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
   
