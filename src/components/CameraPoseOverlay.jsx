@@ -179,9 +179,13 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
                 return angle;
               };
 
-              // Extract 8 normalized angles [0, 1] from joints map
+              // Extract 8 normalized angles [0, 1] from joints map (Filters by confidence > 0.5)
               const extractAngles = (joints) => {
-                const getPoint = (idx) => joints[idx] || null;
+                const getPoint = (idx) => {
+                  const pt = joints[idx];
+                  if (!pt || (pt.visibility !== undefined && pt.visibility < 0.5)) return null;
+                  return pt;
+                };
                 const leftShoulder = getPoint(11);
                 const rightShoulder = getPoint(12);
                 const leftElbow = getPoint(13);
@@ -213,9 +217,12 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
                 const cocoMapping = [0, 2, 5, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
                 for (let i = 0; i < cocoMapping.length; i++) {
                   const idx = cocoMapping[i];
+                  const x = features[i * 2];
+                  const y = features[i * 2 + 1];
                   joints[idx] = {
-                    x: features[i * 2] / 640.0,
-                    y: features[i * 2 + 1] / 480.0
+                    x: x / 640.0,
+                    y: y / 480.0,
+                    visibility: (x === 0 && y === 0) ? 0.0 : 1.0
                   };
                 }
                 return joints;
@@ -686,6 +693,24 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
 
   // Custom skeleton drawing overlay (Draws BOTH sides of the body for complete unilateral/bilateral feedback)
   const drawPose = (ctx, joints, side, w, h) => {
+    // Determine dynamic visibility of limbs based on exercise needs
+    let drawArms = true;
+    let drawLegs = true;
+
+    if (selectedExerciseId === 'dumbbell-hammer-curl') {
+      drawLegs = false; // Curls only require arms and torso
+    } else if (activeExercise.isCustom && customTemplatesRef.current) {
+      const { weights } = customTemplatesRef.current;
+      const armsWeight = weights[0] + weights[1] + weights[2] + weights[3];
+      const legsWeight = weights[4] + weights[5] + weights[6] + weights[7];
+
+      if (armsWeight > 0.75) {
+        drawLegs = false; // Only show torso + arms for upper body movements (like deltoids / curls)
+      } else if (legsWeight > 0.75) {
+        drawArms = false; // Only show torso + legs for lower body movements (like squats)
+      }
+    }
+
     ctx.lineWidth = 4;
     ctx.lineCap = 'round';
 
@@ -711,19 +736,19 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
 
     // Draw connection lines for both sides
     jointsToDraw.forEach(s => {
-      if (s.shoulder && s.elbow) {
+      if (drawArms && s.shoulder && s.elbow) {
         ctx.beginPath(); ctx.moveTo(s.shoulder.x, s.shoulder.y); ctx.lineTo(s.elbow.x, s.elbow.y); ctx.stroke();
       }
-      if (s.elbow && s.wrist) {
+      if (drawArms && s.elbow && s.wrist) {
         ctx.beginPath(); ctx.moveTo(s.elbow.x, s.elbow.y); ctx.lineTo(s.wrist.x, s.wrist.y); ctx.stroke();
       }
       if (s.shoulder && s.hip) {
         ctx.beginPath(); ctx.moveTo(s.shoulder.x, s.shoulder.y); ctx.lineTo(s.hip.x, s.hip.y); ctx.stroke();
       }
-      if (s.hip && s.knee) {
+      if (drawLegs && s.hip && s.knee) {
         ctx.beginPath(); ctx.moveTo(s.hip.x, s.hip.y); ctx.lineTo(s.knee.x, s.knee.y); ctx.stroke();
       }
-      if (s.knee && s.ankle) {
+      if (drawLegs && s.knee && s.ankle) {
         ctx.beginPath(); ctx.moveTo(s.knee.x, s.knee.y); ctx.lineTo(s.ankle.x, s.ankle.y); ctx.stroke();
       }
     });
@@ -741,12 +766,15 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
       ctx.beginPath(); ctx.moveTo(leftHip.x, leftHip.y); ctx.lineTo(rightHip.x, rightHip.y); ctx.stroke();
     }
 
-    // Reset shadow
-    ctx.shadowBlur = 0;
-
-    // Draw glowing joint points for both sides
+    // Draw glowing joint points for both sides (Dynamic visibility)
     jointsToDraw.forEach(s => {
-      [s.shoulder, s.elbow, s.wrist, s.hip, s.knee, s.ankle].forEach(point => {
+      const activePoints = [
+        s.shoulder,
+        ...(drawArms ? [s.elbow, s.wrist] : []),
+        s.hip,
+        ...(drawLegs ? [s.knee, s.ankle] : [])
+      ];
+      activePoints.forEach(point => {
         if (point) {
           ctx.fillStyle = '#ffffff';
           ctx.strokeStyle = glowColor;
