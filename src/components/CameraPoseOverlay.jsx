@@ -199,9 +199,13 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
                 const leftAnkle = getPoint(27);
                 const rightAnkle = getPoint(28);
 
+                // Fallback to virtual vertical trunk axis if hips are off-screen/low visibility
+                const effLeftHip = leftHip || (leftShoulder ? { x: leftShoulder.x, y: leftShoulder.y + 0.1, visibility: 1.0 } : null);
+                const effRightHip = rightHip || (rightShoulder ? { x: rightShoulder.x, y: rightShoulder.y + 0.1, visibility: 1.0 } : null);
+
                 return [
-                  calculateAngle(leftHip, leftShoulder, leftElbow) / 180.0,   // Left Shoulder Abduction (Humerus to Torso)
-                  calculateAngle(rightHip, rightShoulder, rightElbow) / 180.0, // Right Shoulder Abduction (Humerus to Torso)
+                  calculateAngle(effLeftHip, leftShoulder, leftElbow) / 180.0,   // Left Shoulder Abduction (Humerus to Torso)
+                  calculateAngle(effRightHip, rightShoulder, rightElbow) / 180.0, // Right Shoulder Abduction (Humerus to Torso)
                   calculateAngle(leftShoulder, leftElbow, leftWrist) / 180.0,  // Left Elbow Flexion (Forearm/Radius to Humerus)
                   calculateAngle(rightShoulder, rightElbow, rightWrist) / 180.0, // Right Elbow Flexion (Forearm/Radius to Humerus)
                   calculateAngle(leftShoulder, leftHip, leftKnee) / 180.0,     // Left Hip Flexion (Femur to Torso)
@@ -271,7 +275,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
                 sumWeightedSquaredDiff += weights[i] * Math.pow(avgStartAngles[i] - avgPeakAngles[i], 2);
               }
               const templateDistance = Math.sqrt(sumWeightedSquaredDiff);
-              const temperature = Math.max(templateDistance / 2, 0.05);
+              const temperature = Math.max(templateDistance / 2, 0.08);
 
               customTemplatesRef.current = { avgStartAngles, avgPeakAngles, weights, temperature, extractAngles };
               setModel(null); // No TFJS model required for custom exercises
