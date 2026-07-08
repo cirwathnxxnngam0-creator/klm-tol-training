@@ -163,11 +163,12 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
         setModelStatus('loading');
         try {
           if (activeExercise.isCustom) {
-            // Compile a fresh local model for custom exercises
+            // Compile a fresh local model for custom exercises with unique layer names to prevent TFJS conflicts
+            const timestamp = Date.now();
             const loadedModel = window.tf.sequential();
-            loadedModel.add(window.tf.layers.dense({ units: 16, inputShape: [34], activation: 'relu' }));
-            loadedModel.add(window.tf.layers.dense({ units: 8, activation: 'relu' }));
-            loadedModel.add(window.tf.layers.dense({ units: 2, activation: 'softmax' }));
+            loadedModel.add(window.tf.layers.dense({ name: `dense_input_${timestamp}`, units: 16, inputShape: [34], activation: 'relu' }));
+            loadedModel.add(window.tf.layers.dense({ name: `dense_hidden_${timestamp}`, units: 8, activation: 'relu' }));
+            loadedModel.add(window.tf.layers.dense({ name: `dense_output_${timestamp}`, units: 2, activation: 'softmax' }));
             loadedModel.compile({
               optimizer: window.tf.train.adam(0.01),
               loss: 'categoricalCrossentropy',
