@@ -357,7 +357,9 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
         metrics: ['accuracy']
       });
 
-      const inputs = [...startFrames, ...peakFrames];
+      const inputs = [...startFrames, ...peakFrames].map(frame => 
+        frame.map((val, idx) => idx % 2 === 0 ? val / 640 : val / 480)
+      );
       const labels = [
         ...startFrames.map(() => [1, 0]),
         ...peakFrames.map(() => [0, 1])
@@ -366,7 +368,7 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
       const xs = window.tf.tensor2d(inputs, [inputs.length, 34]);
       const ys = window.tf.tensor2d(labels, [labels.length, 2]);
 
-      const epochs = 30;
+      const epochs = 50;
       await model.fit(xs, ys, {
         epochs: epochs,
         callbacks: {

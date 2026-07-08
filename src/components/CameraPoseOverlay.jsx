@@ -179,7 +179,9 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
             const peakFrames = activeExercise.peakFrames || [];
 
             if (startFrames.length > 0 && peakFrames.length > 0) {
-              const inputs = [...startFrames, ...peakFrames];
+              const inputs = [...startFrames, ...peakFrames].map(frame => 
+                frame.map((val, idx) => idx % 2 === 0 ? val / 640 : val / 480)
+              );
               const labels = [
                 ...startFrames.map(() => [1, 0]),
                 ...peakFrames.map(() => [0, 1])
@@ -188,7 +190,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
               const xs = window.tf.tensor2d(inputs, [inputs.length, 34]);
               const ys = window.tf.tensor2d(labels, [labels.length, 2]);
 
-              await loadedModel.fit(xs, ys, { epochs: 20, verbose: 0 });
+              await loadedModel.fit(xs, ys, { epochs: 50, verbose: 0 });
               
               xs.dispose();
               ys.dispose();
@@ -413,7 +415,11 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
   const runAiClassification = async (joints, leftPrimAngle, rightPrimAngle) => {
     if (!model || !window.tf) return;
     try {
-      const features = extractCocoFeatures(joints);
+      const rawFeatures = extractCocoFeatures(joints);
+      const features = activeExercise.isCustom 
+        ? rawFeatures.map((val, idx) => idx % 2 === 0 ? val / 640 : val / 480) 
+        : rawFeatures;
+
       const tensorInput = window.tf.tensor2d([features], [1, 34]);
       const prediction = model.predict(tensorInput);
       const scores = await prediction.data(); // Float32Array length 2 (softmax scores)
