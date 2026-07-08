@@ -67,8 +67,10 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
   const [currentPrimaryAngle, setCurrentPrimaryAngle] = useState(0);
   const [currentSecondaryAngle, setCurrentSecondaryAngle] = useState(0);
   
-  // Rep tracker state machine
-  const repStateRef = useRef('start'); // 'start' | 'halfway'
+  // Rep tracker state machine (Supports unilateral bilateral dual-side tracking with temporal debounce/throttle)
+  const leftRepStateRef = useRef('start'); 
+  const rightRepStateRef = useRef('start'); 
+  const lastRepTimeRef = useRef(0);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -331,52 +333,84 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
     return features;
   };
 
-  // Unified state machine for rep tracking (combines physical angles & AI predictions)
-  const updateRepState = (primAngle, startProb = 0, endProb = 0) => {
-    let isStartPos = false;
-    let isPeakPos = false;
+  // Unified state machine for rep tracking (combines physical angles & AI predictions on both sides)
+  const updateRepState = (leftAngle, rightAngle, startProb = 0, endProb = 0) => {
+    let leftStart = false;
+    let leftPeak = false;
+    let rightStart = false;
+    let rightPeak = false;
 
     // Check if AI model is loaded and actively predicting
     const isAiActive = modelStatus === 'loaded';
 
     if (activeExercise.isCustom) {
       if (isAiActive) {
-        // Rely entirely on local custom AI model probability
-        isStartPos = startProb > 0.70;
-        isPeakPos = endProb > 0.70;
+        // Rely entirely on custom AI classification scores for both sides
+        leftStart = startProb > 0.70;
+        leftPeak = endProb > 0.70;
+        rightStart = startProb > 0.70;
+        rightPeak = endProb > 0.70;
       }
     } else if (selectedExerciseId === 'dumbbell-hammer-curl') {
       if (isAiActive) {
         // Stricter check: Require joint angle AND at least 30% AI classification confidence
-        isStartPos = primAngle > 135 && startProb > 0.30;
-        isPeakPos = primAngle < 75 && primAngle > 15 && endProb > 0.30;
+        leftStart = leftAngle > 135 && startProb > 0.30;
+        leftPeak = leftAngle < 75 && leftAngle > 15 && endProb > 0.30;
+        rightStart = rightAngle > 135 && startProb > 0.30;
+        rightPeak = rightAngle < 75 && rightAngle > 15 && endProb > 0.30;
       } else {
         // Fallback: angles must be in valid ranges (ignoring noise/occlusion 0 deg)
-        isStartPos = primAngle > 135;
-        isPeakPos = primAngle < 75 && primAngle > 15;
+        leftStart = leftAngle > 135;
+        leftPeak = leftAngle < 75 && leftAngle > 15;
+        rightStart = rightAngle > 135;
+        rightPeak = rightAngle < 75 && rightAngle > 15;
       }
     } else if (selectedExerciseId === 'dumbbell-deadlift') {
       if (isAiActive) {
         // Stricter check: Require joint angle AND at least 30% AI classification confidence
-        isStartPos = primAngle > 150 && startProb > 0.30;
-        isPeakPos = primAngle < 120 && primAngle > 40 && endProb > 0.30;
+        leftStart = leftAngle > 150 && startProb > 0.30;
+        leftPeak = leftAngle < 120 && leftAngle > 40 && endProb > 0.30;
+        rightStart = rightAngle > 150 && startProb > 0.30;
+        rightPeak = rightAngle < 120 && rightAngle > 40 && endProb > 0.30;
       } else {
         // Fallback: angles must be in valid ranges (ignoring noise/occlusion 0 deg)
-        isStartPos = primAngle > 150;
-        isPeakPos = primAngle < 120 && primAngle > 40;
+        leftStart = leftAngle > 150;
+        leftPeak = leftAngle < 120 && leftAngle > 40;
+        rightStart = rightAngle > 150;
+        rightPeak = rightAngle < 120 && rightAngle > 40;
       }
     }
 
-    if (repStateRef.current === 'start' && isPeakPos) {
-      repStateRef.current = 'halfway';
-    } else if (repStateRef.current === 'halfway' && isStartPos) {
-      repStateRef.current = 'start';
-      setRepCount(prev => prev + 1);
+    let repTriggered = false;
+
+    // Check LEFT side rep count
+    if (leftRepStateRef.current === 'start' && leftPeak) {
+      leftRepStateRef.current = 'halfway';
+    } else if (leftRepStateRef.current === 'halfway' && leftStart) {
+      leftRepStateRef.current = 'start';
+      repTriggered = true;
+    }
+
+    // Check RIGHT side rep count
+    if (rightRepStateRef.current === 'start' && rightPeak) {
+      rightRepStateRef.current = 'halfway';
+    } else if (rightRepStateRef.current === 'halfway' && rightStart) {
+      rightRepStateRef.current = 'start';
+      repTriggered = true;
+    }
+
+    // Increment repCount with a 1-second debounce window to prevent double-counting simultaneous reps
+    if (repTriggered) {
+      const now = Date.now();
+      if (now - lastRepTimeRef.current > 1000) {
+        setRepCount(prev => prev + 1);
+        lastRepTimeRef.current = now;
+      }
     }
   };
 
   // Run Real-Time inference using the TF.js model
-  const runAiClassification = async (joints, primAngle) => {
+  const runAiClassification = async (joints, leftPrimAngle, rightPrimAngle) => {
     if (!model || !window.tf) return;
     try {
       const features = extractCocoFeatures(joints);
@@ -401,15 +435,15 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
           setAiStateMessage('Posture check: In motion...');
         }
 
-        // Run rep tracking logic using unified state machine
-        updateRepState(primAngle, startProb, endProb);
+        // Run rep tracking logic using unified state machine (evaluates both sides)
+        updateRepState(leftPrimAngle, rightPrimAngle, startProb, endProb);
       }
     } catch (e) {
       console.error("TFJS prediction error:", e);
     }
   };
 
-  // Process posture and fallback angle bounds checking
+  // Process posture and fallback angle bounds checking (Tracks both sides independently!)
   const evaluatePosture = (joints, side) => {
     const rules = {
       'dumbbell-deadlift': {
@@ -424,14 +458,14 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
 
     const exRules = rules[selectedExerciseId] || rules['dumbbell-hammer-curl'];
     
-    const getJointPos = (name) => {
+    const getJointPos = (name, s) => {
       const joint = (() => {
-        if (name === 'shoulder') return side === 'left' ? joints[11] : joints[12];
-        if (name === 'elbow') return side === 'left' ? joints[13] : joints[14];
-        if (name === 'wrist') return side === 'left' ? joints[15] : joints[16];
-        if (name === 'hip') return side === 'left' ? joints[23] : joints[24];
-        if (name === 'knee') return side === 'left' ? joints[25] : joints[26];
-        if (name === 'ankle') return side === 'left' ? joints[27] : joints[28];
+        if (name === 'shoulder') return s === 'left' ? joints[11] : joints[12];
+        if (name === 'elbow') return s === 'left' ? joints[13] : joints[14];
+        if (name === 'wrist') return s === 'left' ? joints[15] : joints[16];
+        if (name === 'hip') return s === 'left' ? joints[23] : joints[24];
+        if (name === 'knee') return s === 'left' ? joints[25] : joints[26];
+        if (name === 'ankle') return s === 'left' ? joints[27] : joints[28];
         return null;
       })();
       
@@ -442,23 +476,42 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
       return joint;
     };
 
-    const jA = getJointPos(exRules.primary.jointA);
-    const jB = getJointPos(exRules.primary.jointB);
-    const jC = getJointPos(exRules.primary.jointC);
-    const primAngle = calculateAngle(jA, jB, jC);
-    setCurrentPrimaryAngle(primAngle);
+    // Calculate left side
+    const leftJA = getJointPos(exRules.primary.jointA, 'left');
+    const leftJB = getJointPos(exRules.primary.jointB, 'left');
+    const leftJC = getJointPos(exRules.primary.jointC, 'left');
+    const leftPrimAngle = calculateAngle(leftJA, leftJB, leftJC);
 
-    const sA = getJointPos(exRules.secondary.jointA);
-    const sB = getJointPos(exRules.secondary.jointB);
-    const sC = getJointPos(exRules.secondary.jointC);
-    const secAngle = calculateAngle(sA, sB, sC);
-    setCurrentSecondaryAngle(secAngle);
+    // Calculate right side
+    const rightJA = getJointPos(exRules.primary.jointA, 'right');
+    const rightJB = getJointPos(exRules.primary.jointB, 'right');
+    const rightJC = getJointPos(exRules.primary.jointC, 'right');
+    const rightPrimAngle = calculateAngle(rightJA, rightJB, rightJC);
+
+    // Default display side
+    const displaySide = getBestSide(joints);
+    const displayAngle = displaySide === 'left' ? leftPrimAngle : rightPrimAngle;
+    setCurrentPrimaryAngle(displayAngle);
+
+    // Secondary angles
+    const leftSA = getJointPos(exRules.secondary.jointA, 'left');
+    const leftSB = getJointPos(exRules.secondary.jointB, 'left');
+    const leftSC = getJointPos(exRules.secondary.jointC, 'left');
+    const leftSecAngle = calculateAngle(leftSA, leftSB, leftSC);
+
+    const rightSA = getJointPos(exRules.secondary.jointA, 'right');
+    const rightSB = getJointPos(exRules.secondary.jointB, 'right');
+    const rightSC = getJointPos(exRules.secondary.jointC, 'right');
+    const rightSecAngle = calculateAngle(rightSA, rightSB, rightSC);
+
+    const displaySecAngle = displaySide === 'left' ? leftSecAngle : rightSecAngle;
+    setCurrentSecondaryAngle(displaySecAngle);
 
     // 1. Run AI Classifier prediction if model loaded, otherwise run fallback state tracker directly
     if (model && window.tf) {
-      runAiClassification(joints, primAngle);
+      runAiClassification(joints, leftPrimAngle, rightPrimAngle);
     } else {
-      updateRepState(primAngle, 0, 0);
+      updateRepState(leftPrimAngle, rightPrimAngle, 0, 0);
     }
 
     // 2. Perform secondary rule validation for visual skeleton styling checks
@@ -466,21 +519,20 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
     let feedback = "Form looking correct. Keep repeating!";
 
     if (selectedExerciseId === 'dumbbell-hammer-curl') {
-      if (secAngle > 20) {
+      if (displaySecAngle > 20) {
         warning = true;
-        feedback = "Warning: Keep elbows locked by your sides!";
+        feedback = "Elbow sway detected! Pin your elbows to your side.";
       }
-    } else {
-      // Deadlift spine check
-      if (secAngle < 140) {
+    } else if (selectedExerciseId === 'dumbbell-deadlift') {
+      if (displaySecAngle < 155 && displaySecAngle > 30) {
         warning = true;
-        feedback = "Warning: Neutral spine lost! Straighten your lower back.";
+        feedback = "Keep your spine neutral! Avoid rounding your lower back.";
       }
     }
 
     setFormFeedback({
       status: warning ? 'warning' : 'good',
-      message: feedback
+      message: warning ? feedback : "Joint angles correct. Maintain speed!"
     });
   };
 
@@ -729,7 +781,8 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
               onChange={(e) => {
                 setSelectedExerciseId(e.target.value);
                 setRepCount(0);
-                repStateRef.current = 'start';
+                leftRepStateRef.current = 'start';
+                rightRepStateRef.current = 'start';
               }}
               disabled={timerActive}
               style={{
