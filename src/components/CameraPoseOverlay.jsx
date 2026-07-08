@@ -71,6 +71,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
   const leftRepStateRef = useRef('start'); 
   const rightRepStateRef = useRef('start'); 
   const lastRepTimeRef = useRef(0);
+  const customTemplatesRef = useRef(null);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -163,42 +164,44 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
         setModelStatus('loading');
         try {
           if (activeExercise.isCustom) {
-            // Compile a fresh local model for custom exercises with unique layer names to prevent TFJS conflicts
-            const timestamp = Date.now();
-            const loadedModel = window.tf.sequential();
-            loadedModel.add(window.tf.layers.dense({ name: `dense_input_${timestamp}`, units: 16, inputShape: [34], activation: 'relu' }));
-            loadedModel.add(window.tf.layers.dense({ name: `dense_hidden_${timestamp}`, units: 8, activation: 'relu' }));
-            loadedModel.add(window.tf.layers.dense({ name: `dense_output_${timestamp}`, units: 2, activation: 'softmax' }));
-            loadedModel.compile({
-              optimizer: window.tf.train.adam(0.01),
-              loss: 'categoricalCrossentropy',
-              metrics: ['accuracy']
-            });
-
-            // Train model on-the-fly on saved custom coordinate frames
             const startFrames = activeExercise.startFrames || [];
             const peakFrames = activeExercise.peakFrames || [];
 
             if (startFrames.length > 0 && peakFrames.length > 0) {
-              const inputs = [...startFrames, ...peakFrames].map(frame => 
-                frame.map((val, idx) => idx % 2 === 0 ? val / 640 : val / 480)
-              );
-              const labels = [
-                ...startFrames.map(() => [1, 0]),
-                ...peakFrames.map(() => [0, 1])
-              ];
+              // Calculate average start pose template
+              const avgStart = new Array(34).fill(0);
+              startFrames.forEach(frame => {
+                frame.forEach((val, idx) => {
+                  avgStart[idx] += val;
+                });
+              });
+              avgStart.forEach((_, idx) => {
+                avgStart[idx] /= startFrames.length;
+              });
 
-              const xs = window.tf.tensor2d(inputs, [inputs.length, 34]);
-              const ys = window.tf.tensor2d(labels, [labels.length, 2]);
+              // Calculate average peak pose template
+              const avgPeak = new Array(34).fill(0);
+              peakFrames.forEach(frame => {
+                frame.forEach((val, idx) => {
+                  avgPeak[idx] += val;
+                });
+              });
+              avgPeak.forEach((_, idx) => {
+                avgPeak[idx] /= peakFrames.length;
+              });
 
-              await loadedModel.fit(xs, ys, { epochs: 50, verbose: 0 });
-              
-              xs.dispose();
-              ys.dispose();
+              // Calculate dynamic temperature based on distance between templates
+              let sumSquaredDiff = 0;
+              for (let i = 0; i < 34; i++) {
+                sumSquaredDiff += Math.pow(avgStart[i] - avgPeak[i], 2);
+              }
+              const templateDistance = Math.sqrt(sumSquaredDiff);
+              const temperature = Math.max(templateDistance / 2, 20.0);
 
-              setModel(loadedModel);
+              customTemplatesRef.current = { avgStart, avgPeak, temperature };
+              setModel(null); // No TFJS model required for custom exercises
               setModelStatus('loaded');
-              setFormFeedback({ status: 'good', message: `AI Model for "${activeExercise.name}" successfully trained locally!` });
+              setFormFeedback({ status: 'good', message: `AI Model for "${activeExercise.name}" initialized!` });
             } else {
               throw new Error('No custom training frames found');
             }
@@ -412,45 +415,84 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
     }
   };
 
-  // Run Real-Time inference using the TF.js model
+  // Run Real-Time inference using the TF.js model (or Custom Euclidean Template Classifier)
   const runAiClassification = async (joints, leftPrimAngle, rightPrimAngle) => {
+    if (activeExercise.isCustom) {
+      if (!customTemplatesRef.current) return;
+      try {
+        const rawFeatures = extractCocoFeatures(joints);
+        const { avgStart, avgPeak, temperature } = customTemplatesRef.current;
+
+        let distStart = 0;
+        let distPeak = 0;
+
+        for (let i = 0; i < 34; i++) {
+          distStart += Math.pow(rawFeatures[i] - avgStart[i], 2);
+          distPeak += Math.pow(rawFeatures[i] - avgPeak[i], 2);
+        }
+        distStart = Math.sqrt(distStart);
+        distPeak = Math.sqrt(distPeak);
+
+        const expStart = Math.exp(-distStart / temperature);
+        const expPeak = Math.exp(-distPeak / temperature);
+        const sum = expStart + expPeak;
+
+        const startProb = sum > 0 ? expStart / sum : 0.5;
+        const endProb = sum > 0 ? expPeak / sum : 0.5;
+
+        // Trace to the terminal to ensure it works on localhost!
+        console.warn("[AI Inference Custom] distStart:", Math.round(distStart), "distPeak:", Math.round(distPeak), "startProb:", startProb.toFixed(2), "endProb:", endProb.toFixed(2));
+
+        setPredictionOutput({ start: startProb, end: endProb });
+
+        // Update active message feedback based on classification outputs
+        if (startProb > 0.75) {
+          setFormFeedback({ status: 'good', message: "Perfect starting posture! Curl to begin." });
+          updateRepState(leftPrimAngle, rightPrimAngle, startProb, endProb);
+        } else if (endProb > 0.75) {
+          setFormFeedback({ status: 'good', message: "Peak contraction reached! Lower down slowly." });
+          updateRepState(leftPrimAngle, rightPrimAngle, startProb, endProb);
+        } else {
+          setFormFeedback({ status: 'info', message: "Maintain control throughout the range." });
+          updateRepState(leftPrimAngle, rightPrimAngle, startProb, endProb);
+        }
+      } catch (e) {
+        console.error("[AI Inference Custom] error:", e);
+      }
+      return;
+    }
+
+    // Standard static TF.js model path
     if (!model || !window.tf) return;
     try {
       const rawFeatures = extractCocoFeatures(joints);
-      const features = activeExercise.isCustom 
-        ? rawFeatures.map((val, idx) => idx % 2 === 0 ? val / 640 : val / 480) 
-        : rawFeatures;
-
-      console.warn("[AI Inference] Raw features first 4:", rawFeatures.slice(0, 4), "Normalized first 4:", features.slice(0, 4));
-
-      const tensorInput = window.tf.tensor2d([features], [1, 34]);
+      const tensorInput = window.tf.tensor2d([rawFeatures], [1, 34]);
       const prediction = model.predict(tensorInput);
       const scores = await prediction.data(); // Float32Array length 2 (softmax scores)
       
       tensorInput.dispose();
       prediction.dispose();
 
-      console.warn("[AI Inference] Softmax Scores:", scores);
+      console.warn("[AI Inference Standard] Softmax Scores:", scores);
 
       if (scores && scores.length === 2) {
         const startProb = scores[0];
         const endProb = scores[1];
         setPredictionOutput({ start: startProb, end: endProb });
 
-        // Update active message feedback based on classification outputs
         if (startProb > 0.75) {
-          setAiStateMessage('Posture check: Start Position (Ready)');
+          setFormFeedback({ status: 'good', message: "Perfect starting posture! Curl to begin." });
+          updateRepState(leftPrimAngle, rightPrimAngle, startProb, endProb);
         } else if (endProb > 0.75) {
-          setAiStateMessage('Posture check: Peak contraction (Good)');
+          setFormFeedback({ status: 'good', message: "Peak contraction reached! Lower down slowly." });
+          updateRepState(leftPrimAngle, rightPrimAngle, startProb, endProb);
         } else {
-          setAiStateMessage('Posture check: In motion...');
+          setFormFeedback({ status: 'info', message: "Maintain control throughout the range." });
+          updateRepState(leftPrimAngle, rightPrimAngle, startProb, endProb);
         }
-
-        // Run rep tracking logic using unified state machine (evaluates both sides)
-        updateRepState(leftPrimAngle, rightPrimAngle, startProb, endProb);
       }
     } catch (e) {
-      console.error("TFJS prediction error:", e);
+      console.error("[AI Inference] TFJS prediction error:", e);
     }
   };
 
@@ -519,7 +561,8 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
     setCurrentSecondaryAngle(displaySecAngle);
 
     // 1. Run AI Classifier prediction if model loaded, otherwise run fallback state tracker directly
-    if (model && window.tf) {
+    const isAiActive = activeExercise.isCustom ? !!customTemplatesRef.current : (!!model && !!window.tf);
+    if (isAiActive) {
       runAiClassification(joints, leftPrimAngle, rightPrimAngle);
     } else {
       updateRepState(leftPrimAngle, rightPrimAngle, 0, 0);
@@ -541,10 +584,12 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
       }
     }
 
-    setFormFeedback({
-      status: warning ? 'warning' : 'good',
-      message: warning ? feedback : "Joint angles correct. Maintain speed!"
-    });
+    if (!isAiActive) {
+      setFormFeedback({
+        status: warning ? 'warning' : 'good',
+        message: warning ? feedback : "Joint angles correct. Maintain speed!"
+      });
+    }
   };
 
   // MediaPipe callback handler
