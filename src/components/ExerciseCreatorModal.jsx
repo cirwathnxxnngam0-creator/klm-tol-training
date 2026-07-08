@@ -617,13 +617,17 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
             </div>
           )}
 
-          {/* STEP 2: Record Start Position */}
-          {step === 2 && (
+          {/* STEPS 2 & 3: Camera Capture Wizard Pages (Permanently mounted camera DOM to prevent unmounting/webcam drop) */}
+          {(step === 2 || step === 3) && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', flexGrow: 1 }}>
               <div style={{ textAlign: 'center' }}>
-                <h3 style={{ fontSize: '0.95rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif', margin: '0 0 0.25rem' }}>1. Start Position</h3>
+                <h3 style={{ fontSize: '0.95rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif', margin: '0 0 0.25rem' }}>
+                  {step === 2 ? '1. Start Position' : '2. Peak Position'}
+                </h3>
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0 }}>
-                  Hold starting pose (e.g. arms fully down) and click Record.
+                  {step === 2 
+                    ? 'Hold starting pose (e.g. arms fully down) and click Record.' 
+                    : 'Hold peak pose (e.g. weights curled all the way up) and click Record.'}
                 </p>
               </div>
 
@@ -632,7 +636,7 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
                 <video ref={videoRef} style={{ display: 'none' }} width="640" height="480" playsInline muted></video>
                 <canvas ref={canvasRef} width="640" height="480" style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }}></canvas>
                 
-                {recordingMode === 'start' && (
+                {recordingMode && (
                   <div className="recording-pulse" style={{ position: 'absolute', top: '0.5rem', left: '0.5rem', background: 'var(--danger)', color: '#fff', fontSize: '0.6rem', fontWeight: '800', padding: '0.25rem 0.5rem', borderRadius: 'var(--radius-full)', boxShadow: '0 0 8px var(--danger)' }}>
                     RECORDING ({recordedCount}/30)
                   </div>
@@ -646,53 +650,26 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: 'auto' }}>
                 <button
-                  onClick={() => startRecording('start')}
+                  onClick={() => startRecording(step === 2 ? 'start' : 'peak')}
                   disabled={recordingMode || mpStatus !== 'loaded'}
                   className="btn btn-primary"
-                  style={{ padding: '0.75rem', background: 'var(--primary)', borderColor: 'var(--primary)' }}
+                  style={{ 
+                    padding: '0.75rem', 
+                    background: step === 2 ? 'var(--primary)' : 'var(--secondary)', 
+                    borderColor: step === 2 ? 'var(--primary)' : 'var(--secondary)' 
+                  }}
                 >
-                  {recordingMode ? 'Recording...' : 'Record Start Pose'}
+                  {recordingMode 
+                    ? 'Recording...' 
+                    : (step === 2 ? 'Record Start Pose' : 'Record Peak Pose')}
                 </button>
-                <button onClick={() => setStep(1)} disabled={recordingMode} className="btn btn-secondary" style={{ padding: '0.5rem', fontSize: '0.75rem' }}>
-                  ← Back to Details
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 3: Record Peak Position */}
-          {step === 3 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', flexGrow: 1 }}>
-              <div style={{ textAlign: 'center' }}>
-                <h3 style={{ fontSize: '0.95rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif', margin: '0 0 0.25rem' }}>2. Peak Position</h3>
-                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0 }}>
-                  Hold peak pose (e.g. weights curled all the way up) and click Record.
-                </p>
-              </div>
-
-              {/* Camera Preview */}
-              <div style={{ background: '#000', height: '240px', borderRadius: 'var(--radius-md)', overflow: 'hidden', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-light)' }}>
-                <video ref={videoRef} style={{ display: 'none' }} width="640" height="480" playsInline muted></video>
-                <canvas ref={canvasRef} width="640" height="480" style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }}></canvas>
-                
-                {recordingMode === 'peak' && (
-                  <div className="recording-pulse" style={{ position: 'absolute', top: '0.5rem', left: '0.5rem', background: 'var(--danger)', color: '#fff', fontSize: '0.6rem', fontWeight: '800', padding: '0.25rem 0.5rem', borderRadius: 'var(--radius-full)', boxShadow: '0 0 8px var(--danger)' }}>
-                    RECORDING ({recordedCount}/30)
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: 'auto' }}>
-                <button
-                  onClick={() => startRecording('peak')}
-                  disabled={recordingMode || mpStatus !== 'loaded'}
-                  className="btn btn-primary"
-                  style={{ padding: '0.75rem', background: 'var(--secondary)', borderColor: 'var(--secondary)' }}
+                <button 
+                  onClick={() => setStep(step === 2 ? 1 : 2)} 
+                  disabled={recordingMode} 
+                  className="btn btn-secondary" 
+                  style={{ padding: '0.5rem', fontSize: '0.75rem' }}
                 >
-                  {recordingMode ? 'Recording...' : 'Record Peak Pose'}
-                </button>
-                <button onClick={() => setStep(2)} disabled={recordingMode} className="btn btn-secondary" style={{ padding: '0.5rem', fontSize: '0.75rem' }}>
-                  ← Back to Start Pose
+                  {step === 2 ? '← Back to Details' : '← Back to Start Pose'}
                 </button>
               </div>
             </div>
