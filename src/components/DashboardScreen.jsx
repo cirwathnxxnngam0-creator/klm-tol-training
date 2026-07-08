@@ -1,5 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { exercises } from '../data/exercises';
+import ExerciseCreatorModal from './ExerciseCreatorModal';
+
+const CustomExerciseIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary)', flexShrink: 0 }}>
+    <circle cx="12" cy="12" r="10" />
+    <polygon points="12 8 8 12 11 12 11 16 15 12 12 12 12 8" fill="currentColor" />
+  </svg>
+);
 
 const DumbbellCurlIcon = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary)', flexShrink: 0 }}>
@@ -63,6 +71,7 @@ export default function DashboardScreen({ onNavigate, refreshTrigger, onSelectEx
   const [selectedExercise, setSelectedExercise] = useState(null);
   const [activeSession, setActiveSession] = useState(null);
   const [stats, setStats] = useState({});
+  const [showCreatorModal, setShowCreatorModal] = useState(false);
 
   // Active manual workout session states
   const [sessionTimer, setSessionTimer] = useState(0);
@@ -161,6 +170,61 @@ export default function DashboardScreen({ onNavigate, refreshTrigger, onSelectEx
         <>
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {/* Create Exercise Bento Box Card */}
+            <div
+              className="glass-card"
+              style={{
+                cursor: 'pointer',
+                transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                padding: '1.25rem',
+                border: '1px dashed var(--primary)',
+                background: 'hsla(var(--h-primary), 85%, 62%, 0.03)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '1rem'
+              }}
+              onClick={() => setShowCreatorModal(true)}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.background = 'hsla(var(--h-primary), 85%, 62%, 0.06)';
+                e.currentTarget.style.borderColor = 'var(--primary)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.background = 'hsla(var(--h-primary), 85%, 62%, 0.03)';
+                e.currentTarget.style.borderColor = 'var(--primary)';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '50%',
+                  background: 'var(--primary-glow)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--primary)',
+                  fontWeight: '900',
+                  fontSize: '1.25rem'
+                }}>
+                  +
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1rem', fontWeight: '850', fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)', margin: 0 }}>
+                    Create Custom AI Exercise
+                  </h3>
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '0.15rem 0 0' }}>
+                    Train a new motion locally using your webcam and TF.js
+                  </p>
+                </div>
+              </div>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary)' }}>
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </div>
+
             {exercises.map((ex) => {
               const exStat = stats[ex.id] || { totalWorkouts: 0, maxWeight: 0 };
               return (
@@ -187,9 +251,9 @@ export default function DashboardScreen({ onNavigate, refreshTrigger, onSelectEx
                     </span>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
-                    {ex.id === 'dumbbell-hammer-curl' ? <DumbbellCurlIcon /> : <DeadliftBarbellIcon />}
-                    <h3 style={{ fontSize: '1.2rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)', margin: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                    {ex.isCustom ? <CustomExerciseIcon /> : (ex.id === 'dumbbell-hammer-curl' ? <DumbbellCurlIcon /> : <DeadliftBarbellIcon />)}
+                    <h3 style={{ fontSize: '1.2rem', fontWeight: '850', fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)', margin: 0 }}>
                       {ex.name}
                     </h3>
                   </div>
@@ -463,6 +527,16 @@ export default function DashboardScreen({ onNavigate, refreshTrigger, onSelectEx
             </button>
           </div>
         </div>
+      )}
+      {/* Render Exercise Creator Modal */}
+      {showCreatorModal && (
+        <ExerciseCreatorModal
+          onClose={() => setShowCreatorModal(false)}
+          onSaveComplete={() => {
+            // Trigger refresh
+            if (onNavigate) onNavigate('workouts');
+          }}
+        />
       )}
     </div>
   );

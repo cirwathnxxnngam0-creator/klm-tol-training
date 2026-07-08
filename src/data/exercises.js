@@ -49,3 +49,24 @@ export const exercises = [
     ]
   }
 ];
+
+// Helper to dynamically load custom exercises into the exported array
+export const loadCustomExercises = () => {
+  try {
+    const stored = localStorage.getItem('klm_custom_exercises');
+    if (stored) {
+      const customs = JSON.parse(stored);
+      // Filter out existing custom items from the exercises array to avoid duplicates
+      const defaults = exercises.filter(e => !e.isCustom);
+      exercises.length = 0;
+      exercises.push(...defaults, ...customs);
+    }
+  } catch (e) {
+    console.error('Failed to load custom exercises from local storage', e);
+  }
+};
+
+// Auto-run once on module import
+if (typeof window !== 'undefined') {
+  loadCustomExercises();
+}

@@ -77,9 +77,11 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
 
   const activeExercise = exercises.find(e => e.id === selectedExerciseId) || exercises[0];
 
-  // Sync weight input when exercise changes (query personal record weight from history)
+  // Sync weight input and reset model state when exercise changes
   useEffect(() => {
     if (activeExercise) {
+      setModel(null);
+      setModelStatus('idle');
       try {
         const history = JSON.parse(localStorage.getItem('workout_history') || '[]');
         const exLogs = history.filter(h => h.exerciseId === activeExercise.id);
@@ -152,17 +154,56 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
     }
   }, [isCameraActive, tfStatus]);
 
-  // Load Custom Posture Model when TF.js is loaded
+  // Load or train Custom Posture Model when TF.js is loaded
   useEffect(() => {
     async function loadPostureModel() {
       if (tfStatus === 'loaded' && window.tf && modelStatus === 'idle') {
         setModelStatus('loading');
         try {
-          // Model is served out of public folder at posture-data/num_js_model/model.json
-          const loadedModel = await window.tf.loadLayersModel('/posture-data/num_js_model/model.json');
-          setModel(loadedModel);
-          setModelStatus('loaded');
-          setFormFeedback({ status: 'good', message: 'AI Model successfully loaded!' });
+          if (activeExercise.isCustom) {
+            // Compile a fresh local model for custom exercises
+            const loadedModel = window.tf.sequential();
+            loadedModel.add(window.tf.layers.dense({ units: 16, inputShape: [34], activation: 'relu' }));
+            loadedModel.add(window.tf.layers.dense({ units: 8, activation: 'relu' }));
+            loadedModel.add(window.tf.layers.dense({ units: 2, activation: 'softmax' }));
+            loadedModel.compile({
+              optimizer: window.tf.train.adam(0.01),
+              loss: 'categoricalCrossentropy',
+              metrics: ['accuracy']
+            });
+
+            // Train model on-the-fly on saved custom coordinate frames
+            const startFrames = activeExercise.startFrames || [];
+            const peakFrames = activeExercise.peakFrames || [];
+
+            if (startFrames.length > 0 && peakFrames.length > 0) {
+              const inputs = [...startFrames, ...peakFrames];
+              const labels = [
+                ...startFrames.map(() => [1, 0]),
+                ...peakFrames.map(() => [0, 1])
+              ];
+
+              const xs = window.tf.tensor2d(inputs, [inputs.length, 34]);
+              const ys = window.tf.tensor2d(labels, [labels.length, 2]);
+
+              await loadedModel.fit(xs, ys, { epochs: 20, verbose: 0 });
+              
+              xs.dispose();
+              ys.dispose();
+
+              setModel(loadedModel);
+              setModelStatus('loaded');
+              setFormFeedback({ status: 'good', message: `AI Model for "${activeExercise.name}" successfully trained locally!` });
+            } else {
+              throw new Error('No custom training frames found');
+            }
+          } else {
+            // Load standard static pre-trained model for built-in exercises
+            const loadedModel = await window.tf.loadLayersModel('/posture-data/num_js_model/model.json');
+            setModel(loadedModel);
+            setModelStatus('loaded');
+            setFormFeedback({ status: 'good', message: 'AI Model successfully loaded!' });
+          }
         } catch (err) {
           console.error("Failed to load layers model:", err);
           setModelStatus('error');
@@ -173,7 +214,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
     if (tfStatus === 'loaded') {
       loadPostureModel();
     }
-  }, [tfStatus, modelStatus]);
+  }, [tfStatus, modelStatus, selectedExerciseId]);
 
   // Handle Video Camera Stream
   useEffect(() => {
@@ -298,7 +339,13 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
     // Check if AI model is loaded and actively predicting
     const isAiActive = modelStatus === 'loaded';
 
-    if (selectedExerciseId === 'dumbbell-hammer-curl') {
+    if (activeExercise.isCustom) {
+      if (isAiActive) {
+        // Rely entirely on local custom AI model probability
+        isStartPos = startProb > 0.70;
+        isPeakPos = endProb > 0.70;
+      }
+    } else if (selectedExerciseId === 'dumbbell-hammer-curl') {
       if (isAiActive) {
         // Stricter check: Require joint angle AND at least 30% AI classification confidence
         isStartPos = primAngle > 135 && startProb > 0.30;
