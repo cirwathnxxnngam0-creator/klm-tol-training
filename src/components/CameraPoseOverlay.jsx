@@ -421,12 +421,16 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
         ? rawFeatures.map((val, idx) => idx % 2 === 0 ? val / 640 : val / 480) 
         : rawFeatures;
 
+      console.log("[AI Inference] Raw features first 4:", rawFeatures.slice(0, 4), "Normalized first 4:", features.slice(0, 4));
+
       const tensorInput = window.tf.tensor2d([features], [1, 34]);
       const prediction = model.predict(tensorInput);
       const scores = await prediction.data(); // Float32Array length 2 (softmax scores)
       
       tensorInput.dispose();
       prediction.dispose();
+
+      console.log("[AI Inference] Softmax Scores:", scores);
 
       if (scores && scores.length === 2) {
         const startProb = scores[0];
