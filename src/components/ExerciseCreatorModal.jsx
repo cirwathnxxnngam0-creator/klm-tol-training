@@ -30,6 +30,7 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
   const poseInstanceRef = useRef(null);
   const requestRef = useRef(null);
   const currentJointsRef = useRef(null);
+  const currentJointsRawRef = useRef(null);
 
   const MUSCLE_OPTIONS = [
     'Sternocleidomastoid (Neck)',
@@ -146,13 +147,64 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
     };
   }, [cameraActive]);
 
-  // Process webcam frame through MediaPipe Pose
+  // Process webcam frame through MediaPipe Pose and render video feed
   const processVideoFrame = async () => {
-    if (videoRef.current && videoRef.current.readyState === 4 && poseInstanceRef.current && mpStatus === 'loaded') {
-      try {
-        await poseInstanceRef.current.send({ image: videoRef.current });
-      } catch (err) {
-        console.error("Frame processing error:", err);
+    if (videoRef.current && videoRef.current.readyState === 4) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        
+        // Clear canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw raw camera feed mirrored instantly at 30fps
+        ctx.save();
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+
+        // Draw skeleton overlay on top if body coordinates are detected
+        if (currentJointsRawRef.current) {
+          ctx.strokeStyle = 'hsl(142, 85%, 62%)';
+          ctx.lineWidth = 3;
+          
+          const connections = [
+            [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], // Upper body
+            [11, 23], [12, 24], [23, 24], // Torso
+            [23, 25], [24, 26], [25, 27], [26, 28] // Lower body
+          ];
+
+          connections.forEach(([i, j]) => {
+            const p1 = currentJointsRawRef.current[i];
+            const p2 = currentJointsRawRef.current[j];
+            if (p1 && p2 && p1.visibility > 0.5 && p2.visibility > 0.5) {
+              ctx.beginPath();
+              ctx.moveTo(canvas.width - p1.x * canvas.width, p1.y * canvas.height);
+              ctx.lineTo(canvas.width - p2.x * canvas.width, p2.y * canvas.height);
+              ctx.stroke();
+            }
+          });
+
+          currentJointsRawRef.current.forEach((lm) => {
+            if (lm.visibility > 0.5) {
+              ctx.fillStyle = 'var(--text-primary)';
+              ctx.beginPath();
+              ctx.arc(canvas.width - lm.x * canvas.width, lm.y * canvas.height, 4, 0, 2 * Math.PI);
+              ctx.fill();
+            }
+          });
+        }
+      }
+
+      // Process MediaPipe landmarks detection in the background
+      if (poseInstanceRef.current && mpStatus === 'loaded') {
+        try {
+          await poseInstanceRef.current.send({ image: video });
+        } catch (err) {
+          console.error("Frame processing error:", err);
+        }
       }
     }
     if (cameraActive) {
@@ -178,59 +230,13 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
     return features;
   };
 
-  // Callback when pose landmarks are returned
+  // Callback when pose landmarks are returned (simply updates coordinates references)
   const onPoseResults = (results) => {
-    if (!canvasRef.current) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    
-    // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw raw camera feed mirrored
-    if (results.image) {
-      ctx.save();
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-      ctx.restore();
-    }
-
-    // Only render overlay and extract landmarks if body coordinates are detected
     if (results.poseLandmarks) {
-      // Draw skeletal connection overlay in Neon Green
-      ctx.strokeStyle = 'hsl(142, 85%, 62%)';
-      ctx.lineWidth = 3;
-      
-      const connections = [
-        [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], // Upper body
-        [11, 23], [12, 24], [23, 24], // Torso
-        [23, 25], [24, 26], [25, 27], [26, 28] // Lower body
-      ];
-
-      connections.forEach(([i, j]) => {
-        const p1 = results.poseLandmarks[i];
-        const p2 = results.poseLandmarks[j];
-        if (p1 && p2 && p1.visibility > 0.5 && p2.visibility > 0.5) {
-          ctx.beginPath();
-          ctx.moveTo(canvas.width - p1.x * canvas.width, p1.y * canvas.height);
-          ctx.lineTo(canvas.width - p2.x * canvas.width, p2.y * canvas.height);
-          ctx.stroke();
-        }
-      });
-
-      results.poseLandmarks.forEach((lm) => {
-        if (lm.visibility > 0.5) {
-          ctx.fillStyle = 'var(--text-primary)';
-          ctx.beginPath();
-          ctx.arc(canvas.width - lm.x * canvas.width, lm.y * canvas.height, 4, 0, 2 * Math.PI);
-          ctx.fill();
-        }
-      });
-
-      const currentFeatures = extractFeatures(results.poseLandmarks);
-      currentJointsRef.current = currentFeatures;
+      currentJointsRawRef.current = results.poseLandmarks;
+      currentJointsRef.current = extractFeatures(results.poseLandmarks);
     } else {
+      currentJointsRawRef.current = null;
       currentJointsRef.current = null;
     }
   };
