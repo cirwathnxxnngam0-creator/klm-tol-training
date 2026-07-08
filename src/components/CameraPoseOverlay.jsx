@@ -168,40 +168,108 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
             const peakFrames = activeExercise.peakFrames || [];
 
             if (startFrames.length > 0 && peakFrames.length > 0) {
-              // Calculate average start pose template
-              const avgStart = new Array(34).fill(0);
-              startFrames.forEach(frame => {
-                frame.forEach((val, idx) => {
-                  avgStart[idx] += val;
+              // Helper to calculate joint angles
+              const calculateAngle = (p1, p2, p3) => {
+                if (!p1 || !p2 || !p3) return 180; // default straight angle
+                const radians = Math.atan2(p3.y - p2.y, p3.x - p2.x) - Math.atan2(p1.y - p2.y, p1.x - p2.x);
+                let angle = Math.abs((radians * 180.0) / Math.PI);
+                if (angle > 180.0) {
+                  angle = 360.0 - angle;
+                }
+                return angle;
+              };
+
+              // Extract 8 normalized angles [0, 1] from joints map
+              const extractAngles = (joints) => {
+                const getPoint = (idx) => joints[idx] || null;
+                const leftShoulder = getPoint(11);
+                const rightShoulder = getPoint(12);
+                const leftElbow = getPoint(13);
+                const rightElbow = getPoint(14);
+                const leftWrist = getPoint(15);
+                const rightWrist = getPoint(16);
+                const leftHip = getPoint(23);
+                const rightHip = getPoint(24);
+                const leftKnee = getPoint(25);
+                const rightKnee = getPoint(26);
+                const leftAnkle = getPoint(27);
+                const rightAnkle = getPoint(28);
+
+                return [
+                  calculateAngle(leftHip, leftShoulder, leftElbow) / 180.0,   // Left Shoulder Abduction (Humerus to Torso)
+                  calculateAngle(rightHip, rightShoulder, rightElbow) / 180.0, // Right Shoulder Abduction (Humerus to Torso)
+                  calculateAngle(leftShoulder, leftElbow, leftWrist) / 180.0,  // Left Elbow Flexion (Forearm/Radius to Humerus)
+                  calculateAngle(rightShoulder, rightElbow, rightWrist) / 180.0, // Right Elbow Flexion (Forearm/Radius to Humerus)
+                  calculateAngle(leftShoulder, leftHip, leftKnee) / 180.0,     // Left Hip Flexion (Femur to Torso)
+                  calculateAngle(rightShoulder, rightHip, rightKnee) / 180.0,   // Right Hip Flexion (Femur to Torso)
+                  calculateAngle(leftHip, leftKnee, leftAnkle) / 180.0,       // Left Knee Flexion (Femur to Tibia)
+                  calculateAngle(rightHip, rightKnee, rightAnkle) / 180.0       // Right Knee Flexion (Femur to Tibia)
+                ];
+              };
+
+              // Reconstruct joints map from 34 flat features
+              const reconstructJoints = (features) => {
+                const joints = {};
+                const cocoMapping = [0, 2, 5, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+                for (let i = 0; i < cocoMapping.length; i++) {
+                  const idx = cocoMapping[i];
+                  joints[idx] = {
+                    x: features[i * 2] / 640.0,
+                    y: features[i * 2 + 1] / 480.0
+                  };
+                }
+                return joints;
+              };
+
+              // Convert training frames into angle vectors
+              const startAnglesList = startFrames.map(f => extractAngles(reconstructJoints(f)));
+              const peakAnglesList = peakFrames.map(f => extractAngles(reconstructJoints(f)));
+
+              // Calculate average start pose angles
+              const avgStartAngles = new Array(8).fill(0);
+              startAnglesList.forEach(angles => {
+                angles.forEach((val, idx) => {
+                  avgStartAngles[idx] += val;
                 });
               });
-              avgStart.forEach((_, idx) => {
-                avgStart[idx] /= startFrames.length;
+              avgStartAngles.forEach((_, idx) => {
+                avgStartAngles[idx] /= startAnglesList.length;
               });
 
-              // Calculate average peak pose template
-              const avgPeak = new Array(34).fill(0);
-              peakFrames.forEach(frame => {
-                frame.forEach((val, idx) => {
-                  avgPeak[idx] += val;
+              // Calculate average peak pose angles
+              const avgPeakAngles = new Array(8).fill(0);
+              peakAnglesList.forEach(angles => {
+                angles.forEach((val, idx) => {
+                  avgPeakAngles[idx] += val;
                 });
               });
-              avgPeak.forEach((_, idx) => {
-                avgPeak[idx] /= peakFrames.length;
+              avgPeakAngles.forEach((_, idx) => {
+                avgPeakAngles[idx] /= peakAnglesList.length;
               });
 
-              // Calculate dynamic temperature based on distance between templates
-              let sumSquaredDiff = 0;
-              for (let i = 0; i < 34; i++) {
-                sumSquaredDiff += Math.pow(avgStart[i] - avgPeak[i], 2);
+              // Calculate template variance weights to focus on the active moving joints!
+              const rawWeights = new Array(8).fill(0);
+              let sumWeights = 0;
+              for (let i = 0; i < 8; i++) {
+                rawWeights[i] = Math.abs(avgStartAngles[i] - avgPeakAngles[i]);
+                sumWeights += rawWeights[i];
               }
-              const templateDistance = Math.sqrt(sumSquaredDiff);
-              const temperature = Math.max(templateDistance / 2, 20.0);
 
-              customTemplatesRef.current = { avgStart, avgPeak, temperature };
+              // Normalize weights (fallback to uniform weight if no motion detected at all)
+              const weights = rawWeights.map(w => sumWeights > 0.05 ? w / sumWeights : 1.0 / 8.0);
+
+              // Calculate temperature based on weighted distance between templates
+              let sumWeightedSquaredDiff = 0;
+              for (let i = 0; i < 8; i++) {
+                sumWeightedSquaredDiff += weights[i] * Math.pow(avgStartAngles[i] - avgPeakAngles[i], 2);
+              }
+              const templateDistance = Math.sqrt(sumWeightedSquaredDiff);
+              const temperature = Math.max(templateDistance / 2, 0.05);
+
+              customTemplatesRef.current = { avgStartAngles, avgPeakAngles, weights, temperature, extractAngles };
               setModel(null); // No TFJS model required for custom exercises
               setModelStatus('loaded');
-              setFormFeedback({ status: 'good', message: `AI Model for "${activeExercise.name}" initialized!` });
+              setFormFeedback({ status: 'good', message: `AI Model for "${activeExercise.name}" initialized using joint angles!` });
             } else {
               throw new Error('No custom training frames found');
             }
