@@ -403,7 +403,8 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
     for (let i = 0; i < cocoMapping.length; i++) {
       const idx = cocoMapping[i];
       const j = joints[idx];
-      if (j) {
+      // Filter by confidence visibility > 0.5 to keep symmetry
+      if (j && (j.visibility === undefined || j.visibility >= 0.5)) {
         features.push(Math.round(j.x * 640));
         features.push(Math.round(j.y * 480));
       } else {
@@ -496,14 +497,18 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
       if (!customTemplatesRef.current) return;
       try {
         const rawFeatures = extractCocoFeatures(joints);
-        const { avgStart, avgPeak, temperature } = customTemplatesRef.current;
+        const { avgStartAngles, avgPeakAngles, weights, temperature, extractAngles, reconstructJoints } = customTemplatesRef.current;
+        
+        // Reconstruct live joints map from raw features for 100% template alignment
+        const liveJoints = reconstructJoints(rawFeatures);
+        const liveAngles = extractAngles(liveJoints);
 
         let distStart = 0;
         let distPeak = 0;
 
-        for (let i = 0; i < 34; i++) {
-          distStart += Math.pow(rawFeatures[i] - avgStart[i], 2);
-          distPeak += Math.pow(rawFeatures[i] - avgPeak[i], 2);
+        for (let i = 0; i < 8; i++) {
+          distStart += weights[i] * Math.pow(liveAngles[i] - avgStartAngles[i], 2);
+          distPeak += weights[i] * Math.pow(liveAngles[i] - avgPeakAngles[i], 2);
         }
         distStart = Math.sqrt(distStart);
         distPeak = Math.sqrt(distPeak);
@@ -516,7 +521,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
         const endProb = sum > 0 ? expPeak / sum : 0.5;
 
         // Trace to the terminal to ensure it works on localhost!
-        console.warn("[AI Inference Custom] distStart:", Math.round(distStart), "distPeak:", Math.round(distPeak), "startProb:", startProb.toFixed(2), "endProb:", endProb.toFixed(2));
+        console.warn("[AI Inference Custom] distStart:", distStart.toFixed(3), "distPeak:", distPeak.toFixed(3), "startProb:", startProb.toFixed(2), "endProb:", endProb.toFixed(2));
 
         setPredictionOutput({ start: startProb, end: endProb });
 

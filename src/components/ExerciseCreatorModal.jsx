@@ -264,7 +264,8 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
     for (let i = 0; i < cocoMapping.length; i++) {
       const idx = cocoMapping[i];
       const j = landmarks[idx];
-      if (j) {
+      // Filter by confidence visibility > 0.5 to keep symmetry
+      if (j && (j.visibility === undefined || j.visibility >= 0.5)) {
         features.push(Math.round(j.x * 640));
         features.push(Math.round(j.y * 480));
       } else {
