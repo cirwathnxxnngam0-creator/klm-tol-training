@@ -560,7 +560,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
     return leftShoulder.visibility > rightShoulder.visibility ? 'left' : 'right';
   };
 
-  // Custom skeleton drawing overlay
+  // Custom skeleton drawing overlay (Draws BOTH sides of the body for complete unilateral/bilateral feedback)
   const drawPose = (ctx, joints, side, w, h) => {
     ctx.lineWidth = 4;
     ctx.lineCap = 'round';
@@ -571,55 +571,68 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
       return { x: j.x * w, y: j.y * h };
     };
 
-    // Draw main structural bones
-    const shoulder = getCoord(side === 'left' ? 11 : 12);
-    const elbow = getCoord(side === 'left' ? 13 : 14);
-    const wrist = getCoord(side === 'left' ? 15 : 16);
-    const hip = getCoord(side === 'left' ? 23 : 24);
-    const knee = getCoord(side === 'left' ? 25 : 26);
-    const ankle = getCoord(side === 'left' ? 27 : 28);
+    // Calculate joints for BOTH sides
+    const jointsToDraw = [
+      // Left side
+      { shoulder: getCoord(11), elbow: getCoord(13), wrist: getCoord(15), hip: getCoord(23), knee: getCoord(25), ankle: getCoord(27) },
+      // Right side
+      { shoulder: getCoord(12), elbow: getCoord(14), wrist: getCoord(16), hip: getCoord(24), knee: getCoord(26), ankle: getCoord(28) }
+    ];
 
     // Select color based on warning states
     const glowColor = formFeedback.status === 'warning' ? 'rgba(239, 68, 68, 0.8)' : 'rgba(52, 211, 153, 0.8)';
     ctx.shadowBlur = 12;
     ctx.shadowColor = glowColor;
+    ctx.strokeStyle = glowColor;
 
-    // Drawing lines connecting joints
-    if (shoulder && elbow) {
-      ctx.strokeStyle = glowColor;
-      ctx.beginPath(); ctx.moveTo(shoulder.x, shoulder.y); ctx.lineTo(elbow.x, elbow.y); ctx.stroke();
+    // Draw connection lines for both sides
+    jointsToDraw.forEach(s => {
+      if (s.shoulder && s.elbow) {
+        ctx.beginPath(); ctx.moveTo(s.shoulder.x, s.shoulder.y); ctx.lineTo(s.elbow.x, s.elbow.y); ctx.stroke();
+      }
+      if (s.elbow && s.wrist) {
+        ctx.beginPath(); ctx.moveTo(s.elbow.x, s.elbow.y); ctx.lineTo(s.wrist.x, s.wrist.y); ctx.stroke();
+      }
+      if (s.shoulder && s.hip) {
+        ctx.beginPath(); ctx.moveTo(s.shoulder.x, s.shoulder.y); ctx.lineTo(s.hip.x, s.hip.y); ctx.stroke();
+      }
+      if (s.hip && s.knee) {
+        ctx.beginPath(); ctx.moveTo(s.hip.x, s.hip.y); ctx.lineTo(s.knee.x, s.knee.y); ctx.stroke();
+      }
+      if (s.knee && s.ankle) {
+        ctx.beginPath(); ctx.moveTo(s.knee.x, s.knee.y); ctx.lineTo(s.ankle.x, s.ankle.y); ctx.stroke();
+      }
+    });
+
+    // Draw torso connections (connecting left and right)
+    const leftShoulder = getCoord(11);
+    const rightShoulder = getCoord(12);
+    const leftHip = getCoord(23);
+    const rightHip = getCoord(24);
+
+    if (leftShoulder && rightShoulder) {
+      ctx.beginPath(); ctx.moveTo(leftShoulder.x, leftShoulder.y); ctx.lineTo(rightShoulder.x, rightShoulder.y); ctx.stroke();
     }
-    if (elbow && wrist) {
-      ctx.strokeStyle = glowColor;
-      ctx.beginPath(); ctx.moveTo(elbow.x, elbow.y); ctx.lineTo(wrist.x, wrist.y); ctx.stroke();
-    }
-    if (shoulder && hip) {
-      ctx.strokeStyle = glowColor;
-      ctx.beginPath(); ctx.moveTo(shoulder.x, shoulder.y); ctx.lineTo(hip.x, hip.y); ctx.stroke();
-    }
-    if (hip && knee) {
-      ctx.strokeStyle = glowColor;
-      ctx.beginPath(); ctx.moveTo(hip.x, hip.y); ctx.lineTo(knee.x, knee.y); ctx.stroke();
-    }
-    if (knee && ankle) {
-      ctx.strokeStyle = glowColor;
-      ctx.beginPath(); ctx.moveTo(knee.x, knee.y); ctx.lineTo(ankle.x, ankle.y); ctx.stroke();
+    if (leftHip && rightHip) {
+      ctx.beginPath(); ctx.moveTo(leftHip.x, leftHip.y); ctx.lineTo(rightHip.x, rightHip.y); ctx.stroke();
     }
 
     // Reset shadow
     ctx.shadowBlur = 0;
 
-    // Draw glowing joint points
-    [shoulder, elbow, wrist, hip, knee, ankle].forEach(point => {
-      if (point) {
-        ctx.fillStyle = '#ffffff';
-        ctx.strokeStyle = glowColor;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, 7, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-      }
+    // Draw glowing joint points for both sides
+    jointsToDraw.forEach(s => {
+      [s.shoulder, s.elbow, s.wrist, s.hip, s.knee, s.ankle].forEach(point => {
+        if (point) {
+          ctx.fillStyle = '#ffffff';
+          ctx.strokeStyle = glowColor;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 7, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+      });
     });
   };
 
