@@ -180,7 +180,7 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
 
   // Callback when pose landmarks are returned
   const onPoseResults = (results) => {
-    if (!canvasRef.current || !results.poseLandmarks) return;
+    if (!canvasRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     
@@ -188,44 +188,51 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
     // Draw raw camera feed mirrored
-    ctx.save();
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-    ctx.restore();
+    if (results.image) {
+      ctx.save();
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    }
 
-    // Draw skeletal connection overlay in Neon Green
-    ctx.strokeStyle = 'hsl(142, 85%, 62%)';
-    ctx.lineWidth = 3;
-    
-    const connections = [
-      [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], // Upper body
-      [11, 23], [12, 24], [23, 24], // Torso
-      [23, 25], [24, 26], [25, 27], [26, 28] // Lower body
-    ];
+    // Only render overlay and extract landmarks if body coordinates are detected
+    if (results.poseLandmarks) {
+      // Draw skeletal connection overlay in Neon Green
+      ctx.strokeStyle = 'hsl(142, 85%, 62%)';
+      ctx.lineWidth = 3;
+      
+      const connections = [
+        [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], // Upper body
+        [11, 23], [12, 24], [23, 24], // Torso
+        [23, 25], [24, 26], [25, 27], [26, 28] // Lower body
+      ];
 
-    connections.forEach(([i, j]) => {
-      const p1 = results.poseLandmarks[i];
-      const p2 = results.poseLandmarks[j];
-      if (p1 && p2 && p1.visibility > 0.5 && p2.visibility > 0.5) {
-        ctx.beginPath();
-        ctx.moveTo(canvas.width - p1.x * canvas.width, p1.y * canvas.height);
-        ctx.lineTo(canvas.width - p2.x * canvas.width, p2.y * canvas.height);
-        ctx.stroke();
-      }
-    });
+      connections.forEach(([i, j]) => {
+        const p1 = results.poseLandmarks[i];
+        const p2 = results.poseLandmarks[j];
+        if (p1 && p2 && p1.visibility > 0.5 && p2.visibility > 0.5) {
+          ctx.beginPath();
+          ctx.moveTo(canvas.width - p1.x * canvas.width, p1.y * canvas.height);
+          ctx.lineTo(canvas.width - p2.x * canvas.width, p2.y * canvas.height);
+          ctx.stroke();
+        }
+      });
 
-    results.poseLandmarks.forEach((lm) => {
-      if (lm.visibility > 0.5) {
-        ctx.fillStyle = 'var(--text-primary)';
-        ctx.beginPath();
-        ctx.arc(canvas.width - lm.x * canvas.width, lm.y * canvas.height, 4, 0, 2 * Math.PI);
-        ctx.fill();
-      }
-    });
+      results.poseLandmarks.forEach((lm) => {
+        if (lm.visibility > 0.5) {
+          ctx.fillStyle = 'var(--text-primary)';
+          ctx.beginPath();
+          ctx.arc(canvas.width - lm.x * canvas.width, lm.y * canvas.height, 4, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      });
 
-    const currentFeatures = extractFeatures(results.poseLandmarks);
-    currentJointsRef.current = currentFeatures;
+      const currentFeatures = extractFeatures(results.poseLandmarks);
+      currentJointsRef.current = currentFeatures;
+    } else {
+      currentJointsRef.current = null;
+    }
   };
 
   // Record loop
