@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { exercises } from '../data/exercises';
+import { exercises, loadCustomExercises } from '../data/exercises';
 import ExerciseCreatorModal from './ExerciseCreatorModal';
 
 const CustomExerciseIcon = () => (
@@ -72,6 +72,25 @@ export default function DashboardScreen({ onNavigate, refreshTrigger, onSelectEx
   const [activeSession, setActiveSession] = useState(null);
   const [stats, setStats] = useState({});
   const [showCreatorModal, setShowCreatorModal] = useState(false);
+
+  const handleDeleteExercise = (exerciseId) => {
+    if (window.confirm('Are you sure you want to delete this custom exercise? This will delete all its training frames and is permanent.')) {
+      try {
+        const stored = JSON.parse(localStorage.getItem('klm_custom_exercises') || '[]');
+        const updated = stored.filter(ex => ex.id !== exerciseId);
+        localStorage.setItem('klm_custom_exercises', JSON.stringify(updated));
+        
+        loadCustomExercises();
+        
+        if (onNavigate) {
+          onNavigate('workouts');
+        }
+        alert('Custom exercise deleted successfully!');
+      } catch (err) {
+        console.error('Failed to delete custom exercise:', err);
+      }
+    }
+  };
 
   // Active manual workout session states
   const [sessionTimer, setSessionTimer] = useState(0);
@@ -249,6 +268,31 @@ export default function DashboardScreen({ onNavigate, refreshTrigger, onSelectEx
                     }}>
                       {ex.category}
                     </span>
+                    {ex.isCustom && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteExercise(ex.id);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--danger)',
+                          fontSize: '0.7rem',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          padding: '0.2rem 0.4rem',
+                          borderRadius: '4px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          transition: 'background 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = 'hsla(350, 80%, 55%, 0.1)'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
