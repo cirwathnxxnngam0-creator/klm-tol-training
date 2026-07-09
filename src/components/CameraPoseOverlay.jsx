@@ -278,13 +278,23 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
               // Calculate template variance weights to focus on the active moving joints!
               const rawWeights = new Array(8).fill(0);
               let sumWeights = 0;
+              const selectedJoints = activeExercise.selectedJoints || [true, true, true, true, true, true, true, true];
+              
               for (let i = 0; i < 8; i++) {
-                rawWeights[i] = Math.abs(avgStartAngles[i] - avgPeakAngles[i]);
-                sumWeights += rawWeights[i];
+                if (selectedJoints[i]) {
+                  rawWeights[i] = Math.abs(avgStartAngles[i] - avgPeakAngles[i]);
+                  sumWeights += rawWeights[i];
+                } else {
+                  rawWeights[i] = 0;
+                }
               }
 
-              // Normalize weights (fallback to uniform weight if no motion detected at all)
-              const weights = rawWeights.map(w => sumWeights > 0.05 ? w / sumWeights : 1.0 / 8.0);
+              // Normalize weights (fallback to uniform active weight if no motion detected at all)
+              const numActive = selectedJoints.filter(Boolean).length || 8;
+              const weights = rawWeights.map((w, idx) => {
+                if (!selectedJoints[idx]) return 0;
+                return sumWeights > 0.05 ? w / sumWeights : 1.0 / numActive;
+              });
 
               // Calculate temperature based on weighted distance between templates
               let sumWeightedSquaredDiff = 0;

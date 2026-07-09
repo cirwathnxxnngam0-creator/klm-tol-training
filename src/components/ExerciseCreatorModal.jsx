@@ -1,6 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { loadCustomExercises } from '../data/exercises';
 
+const JOINT_NAMES = [
+  'Left Shoulder (Humerus/Torso)',
+  'Right Shoulder (Humerus/Torso)',
+  'Left Elbow (Radius/Humerus)',
+  'Right Elbow (Radius/Humerus)',
+  'Left Hip',
+  'Right Hip',
+  'Left Knee',
+  'Right Knee'
+];
+
 export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
   const [step, setStep] = useState(1);
   const [exerciseName, setExerciseName] = useState('');
@@ -27,7 +38,9 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
   const [allScannedFrames, setAllScannedFrames] = useState([]);
   const [startFrameIndex, setStartFrameIndex] = useState(0);
   const [peakFrameIndex, setPeakFrameIndex] = useState(0);
-
+  // Parallel array of thumbnails for preview underlay
+  const [allScannedThumbnails, setAllScannedThumbnails] = useState([]);
+  const [selectedJoints, setSelectedJoints] = useState([true, true, true, true, true, true, true, true]);
   // Collected datasets
   const [startFrames, setStartFrames] = useState([]);
   const [peakFrames, setPeakFrames] = useState([]);
@@ -163,70 +176,113 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
     }
   }, [tfActive, tfStatus]);
 
+  // Initialize default active joints based on Category
+  useEffect(() => {
+    if (step === 2 || step === 5 || step === 6) {
+      const isUpper = category.includes('Arms') || category.includes('Shoulders') || category.includes('Chest') || category.includes('Back');
+      const isLower = category.includes('Legs');
+      if (isUpper) {
+        setSelectedJoints([true, true, true, true, false, false, false, false]);
+      } else if (isLower) {
+        setSelectedJoints([false, false, false, false, true, true, true, true]);
+      } else {
+        setSelectedJoints([true, true, true, true, true, true, true, true]);
+      }
+    }
+  }, [category, step]);
+
   // Draw skeleton previews on Step 6 (Save screen)
   useEffect(() => {
     if (step === 6) {
-      const drawPreview = (canvas, frame, color) => {
-        if (!canvas || !frame) return;
+      const drawPreview = (canvas, frame, thumbnail, color) => {
+        if (!canvas) return;
         const ctx = canvas.getContext('2d');
         const w = canvas.width;
         const h = canvas.height;
         ctx.clearRect(0, 0, w, h);
 
-        // Draw dark background box
-        ctx.fillStyle = 'hsl(240, 16%, 6%)';
-        ctx.fillRect(0, 0, w, h);
+        const drawSkeleton = () => {
+          if (!frame) return;
+          const joints = reconstructJoints(frame);
+          const connections = [
+            [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
+            [11, 23], [12, 24], [23, 24],
+            [23, 25], [24, 26], [25, 27], [26, 28]
+          ];
 
-        // Reconstruct joints from features
-        const joints = reconstructJoints(frame);
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 3;
+          
+          connections.forEach(([i, j]) => {
+            const p1 = joints[i];
+            const p2 = joints[j];
+            if (p1 && p2 && p1.visibility > 0.1 && p2.visibility > 0.1) {
+              ctx.beginPath();
+              ctx.moveTo(p1.x * w, p1.y * h);
+              ctx.lineTo(p2.x * w, p2.y * h);
+              ctx.stroke();
+            }
+          });
 
-        // Render connectors
-        const connections = [
-          [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
-          [11, 23], [12, 24], [23, 24],
-          [23, 25], [24, 26], [25, 27], [26, 28]
-        ];
+          Object.keys(joints).forEach((idxStr) => {
+            const idx = parseInt(idxStr);
+            const pt = joints[idx];
+            if (pt && pt.visibility > 0.1) {
+              let jointIdx = -1;
+              if (idx === 11) jointIdx = 0;
+              else if (idx === 12) jointIdx = 1;
+              else if (idx === 13) jointIdx = 2;
+              else if (idx === 14) jointIdx = 3;
+              else if (idx === 23) jointIdx = 4;
+              else if (idx === 24) jointIdx = 5;
+              else if (idx === 25) jointIdx = 6;
+              else if (idx === 26) jointIdx = 7;
 
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2.5;
-        
-        connections.forEach(([i, j]) => {
-          const p1 = joints[i];
-          const p2 = joints[j];
-          if (p1 && p2 && p1.visibility > 0.1 && p2.visibility > 0.1) {
-            ctx.beginPath();
-            ctx.moveTo(p1.x * w, p1.y * h);
-            ctx.lineTo(p2.x * w, p2.y * h);
-            ctx.stroke();
-          }
-        });
+              if (jointIdx !== -1) {
+                const isActive = selectedJoints[jointIdx];
+                ctx.fillStyle = isActive ? color : 'rgba(128,128,128,0.5)';
+                ctx.beginPath();
+                ctx.arc(pt.x * w, pt.y * h, isActive ? 5 : 3, 0, 2 * Math.PI);
+                ctx.fill();
+              } else {
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(pt.x * w, pt.y * h, 3, 0, 2 * Math.PI);
+                ctx.fill();
+              }
+            }
+          });
+        };
 
-        // Render joints points
-        Object.keys(joints).forEach(idx => {
-          const pt = joints[idx];
-          if (pt && pt.visibility > 0.1) {
-            ctx.fillStyle = '#ffffff';
-            ctx.beginPath();
-            ctx.arc(pt.x * w, pt.y * h, 3, 0, 2 * Math.PI);
-            ctx.fill();
-          }
-        });
+        if (thumbnail) {
+          const img = new Image();
+          img.src = thumbnail;
+          img.onload = () => {
+            ctx.drawImage(img, 0, 0, w, h);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+            ctx.fillRect(0, 0, w, h);
+            drawSkeleton();
+          };
+        } else {
+          ctx.fillStyle = 'hsl(240, 16%, 6%)';
+          ctx.fillRect(0, 0, w, h);
+          drawSkeleton();
+        }
       };
 
       if (creationMethod === 'video' && allScannedFrames.length > 0) {
-        drawPreview(startCanvasRef.current, allScannedFrames[startFrameIndex], 'var(--primary)');
-        drawPreview(peakCanvasRef.current, allScannedFrames[peakFrameIndex], 'var(--secondary)');
+        drawPreview(startCanvasRef.current, allScannedFrames[startFrameIndex], allScannedThumbnails[startFrameIndex], 'var(--primary)');
+        drawPreview(peakCanvasRef.current, allScannedFrames[peakFrameIndex], allScannedThumbnails[peakFrameIndex], 'var(--secondary)');
       } else {
-        // Webcam mode - draw average or first recorded frame
         if (startFrames.length > 0) {
-          drawPreview(startCanvasRef.current, startFrames[0], 'var(--primary)');
+          drawPreview(startCanvasRef.current, startFrames[0], null, 'var(--primary)');
         }
         if (peakFrames.length > 0) {
-          drawPreview(peakCanvasRef.current, peakFrames[0], 'var(--secondary)');
+          drawPreview(peakCanvasRef.current, peakFrames[0], null, 'var(--secondary)');
         }
       }
     }
-  }, [step, startFrameIndex, peakFrameIndex, startFrames, peakFrames, allScannedFrames, creationMethod]);
+  }, [step, startFrameIndex, peakFrameIndex, startFrames, peakFrames, allScannedFrames, allScannedThumbnails, selectedJoints, creationMethod]);
 
   // Start video feed webcam
   useEffect(() => {
@@ -497,11 +553,17 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
       const duration = video.duration;
       const stepSize = 0.4;
       const frames = [];
+      const thumbnails = [];
 
       const tempCanvas = document.createElement('canvas');
       tempCanvas.width = 640;
       tempCanvas.height = 480;
       const ctx = tempCanvas.getContext('2d');
+
+      const thumbCanvas = document.createElement('canvas');
+      thumbCanvas.width = 160;
+      thumbCanvas.height = 120;
+      const thumbCtx = thumbCanvas.getContext('2d');
 
       const scannerPose = new window.Pose({
         locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
@@ -538,6 +600,8 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
         
         if (currentScannedFrame) {
           frames.push(currentScannedFrame);
+          thumbCtx.drawImage(tempCanvas, 0, 0, 160, 120);
+          thumbnails.push(thumbCanvas.toDataURL('image/jpeg', 0.5));
         }
 
         currentTime += stepSize;
@@ -596,6 +660,7 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
       });
 
       setAllScannedFrames(frames);
+      setAllScannedThumbnails(thumbnails);
       setStartFrameIndex(bestStartIdx);
       setPeakFrameIndex(bestPeakIdx);
       
@@ -748,6 +813,7 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
       defaultReps: 12,
       defaultWeightKg: 10,
       isCustom: true,
+      selectedJoints: selectedJoints,
       startFrames: creationMethod === 'video' ? [allScannedFrames[startFrameIndex]] : startFrames,
       peakFrames: creationMethod === 'video' ? [allScannedFrames[peakFrameIndex]] : peakFrames,
       instructions: [
@@ -1229,6 +1295,32 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
                       <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>Frame {peakFrameIndex + 1} of {allScannedFrames.length}</span>
                     </div>
                   )}
+                </div>
+              </div>
+
+              {/* Joint Selection Badges */}
+              <div style={{ width: '100%', textAlign: 'left', background: 'hsla(0,0%,100%,0.02)', padding: '0.85rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.75rem' }}>
+                <strong style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: '0.5rem' }}>
+                  🎯 Select Active Joints to Track:
+                </strong>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem' }}>
+                  {JOINT_NAMES.map((name, idx) => (
+                    <label key={name} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', userSelect: 'none', color: 'var(--text-muted)' }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedJoints[idx]}
+                        onChange={(e) => {
+                          const updated = [...selectedJoints];
+                          updated[idx] = e.target.checked;
+                          setSelectedJoints(updated);
+                        }}
+                        style={{ cursor: 'pointer', accentColor: 'var(--primary)' }}
+                      />
+                      <span style={{ color: selectedJoints[idx] ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: selectedJoints[idx] ? '700' : 'normal' }}>
+                        {name}
+                      </span>
+                    </label>
+                  ))}
                 </div>
               </div>
 
