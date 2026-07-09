@@ -10,6 +10,7 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
   
   // Camera & Tracking states
   const cameraActive = step === 3 || step === 4;
+  const mpActive = cameraActive || step === 7;
   const tfActive = cameraActive || step === 5;
   const [mpStatus, setMpStatus] = useState('idle');
   const [tfStatus, setTfStatus] = useState('idle');
@@ -70,10 +71,9 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
     'Iliopsoas (Hip Flexors)'
   ];
 
-  // Load MediaPipe Pose
   // Load MediaPipe Pose (check window first to prevent double-loader issues)
   useEffect(() => {
-    if (cameraActive) {
+    if (mpActive) {
       if (window.Pose && !poseInstanceRef.current) {
         try {
           const pose = new window.Pose({
@@ -129,7 +129,7 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
         document.body.appendChild(script);
       }
     }
-  }, [cameraActive, mpStatus]);
+  }, [mpActive, mpStatus]);
 
   // Load TensorFlow.js (check window first to prevent double-loader issues)
   useEffect(() => {
