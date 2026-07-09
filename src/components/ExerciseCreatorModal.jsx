@@ -9,10 +9,19 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
   const [muscleSearch, setMuscleSearch] = useState('');
   
   // Camera & Tracking states
-  const cameraActive = step === 2 || step === 3;
+  const cameraActive = step === 3 || step === 4;
+  const tfActive = cameraActive || step === 5;
   const [mpStatus, setMpStatus] = useState('idle');
   const [tfStatus, setTfStatus] = useState('idle');
   
+  // Creation method: 'live' (Webcam) or 'video' (Upload Video)
+  const [creationMethod, setCreationMethod] = useState(null);
+
+  // Video processing states
+  const [isProcessingVideo, setIsProcessingVideo] = useState(false);
+  const [videoProcessProgress, setVideoProcessProgress] = useState(0);
+  const [videoProcessLog, setVideoProcessLog] = useState('');
+
   // Collected datasets
   const [startFrames, setStartFrames] = useState([]);
   const [peakFrames, setPeakFrames] = useState([]);
@@ -124,7 +133,7 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
 
   // Load TensorFlow.js (check window first to prevent double-loader issues)
   useEffect(() => {
-    if (cameraActive) {
+    if (tfActive) {
       if (window.tf) {
         setTfStatus('loaded');
         return;
@@ -145,7 +154,7 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
         document.body.appendChild(script);
       }
     }
-  }, [cameraActive, tfStatus]);
+  }, [tfActive, tfStatus]);
 
   // Start video feed webcam
   useEffect(() => {
@@ -276,6 +285,239 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
     return features;
   };
 
+  const calculateAngle = (p1, p2, p3) => {
+    if (!p1 || !p2 || !p3) return 180;
+    const radians = Math.atan2(p3.y - p2.y, p3.x - p2.x) - Math.atan2(p1.y - p2.y, p1.x - p2.x);
+    let angle = Math.abs((radians * 180.0) / Math.PI);
+    if (angle > 180.0) angle = 360.0 - angle;
+    return angle;
+  };
+
+  const reconstructJoints = (features) => {
+    const joints = {};
+    const cocoMappingLocal = [0, 2, 5, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+    for (let i = 0; i < cocoMappingLocal.length; i++) {
+      const idx = cocoMappingLocal[i];
+      const x = features[i * 2];
+      const y = features[i * 2 + 1];
+      joints[idx] = {
+        x: x / 640.0,
+        y: y / 480.0,
+        visibility: (x === 0 && y === 0) ? 0.0 : 1.0
+      };
+    }
+    return joints;
+  };
+
+  const extractAngles = (joints) => {
+    const getPoint = (idx) => {
+      const pt = joints[idx];
+      if (!pt || (pt.visibility !== undefined && pt.visibility < 0.5)) return null;
+      return pt;
+    };
+    const leftShoulder = getPoint(11);
+    const rightShoulder = getPoint(12);
+    const leftElbow = getPoint(13);
+    const rightElbow = getPoint(14);
+    const leftWrist = getPoint(15);
+    const rightWrist = getPoint(16);
+    const leftHip = getPoint(23);
+    const rightHip = getPoint(24);
+    const leftKnee = getPoint(25);
+    const rightKnee = getPoint(26);
+    const leftAnkle = getPoint(27);
+    const rightAnkle = getPoint(28);
+
+    const effLeftHip = leftHip || (leftShoulder ? { x: leftShoulder.x, y: leftShoulder.y + 0.1, visibility: 1.0 } : null);
+    const effRightHip = rightHip || (rightShoulder ? { x: rightShoulder.x, y: rightShoulder.y + 0.1, visibility: 1.0 } : null);
+
+    return [
+      calculateAngle(effLeftHip, leftShoulder, leftElbow) / 180.0,
+      calculateAngle(effRightHip, rightShoulder, rightElbow) / 180.0,
+      calculateAngle(leftShoulder, leftElbow, leftWrist) / 180.0,
+      calculateAngle(rightShoulder, rightElbow, rightWrist) / 180.0,
+      calculateAngle(leftShoulder, leftHip, leftKnee) / 180.0,
+      calculateAngle(rightShoulder, rightHip, rightKnee) / 180.0,
+      calculateAngle(leftHip, leftKnee, leftAnkle) / 180.0,
+      calculateAngle(rightHip, rightKnee, rightAnkle) / 180.0
+    ];
+  };
+
+  const runKMeans2 = (featuresList) => {
+    if (featuresList.length < 2) return { cluster0Indices: [], cluster1Indices: [] };
+
+    let centroidA = [...featuresList[0]];
+    let maxDist = -1;
+    let centroidB = [...featuresList[0]];
+    featuresList.forEach(f => {
+      let dist = 0;
+      for (let i = 0; i < 8; i++) dist += Math.pow(f[i] - centroidA[i], 2);
+      if (dist > maxDist) {
+        maxDist = dist;
+        centroidB = [...f];
+      }
+    });
+
+    let assignments = new Array(featuresList.length).fill(0);
+    const iterations = 15;
+    
+    for (let iter = 0; iter < iterations; iter++) {
+      featuresList.forEach((f, idx) => {
+        let distA = 0;
+        let distB = 0;
+        for (let i = 0; i < 8; i++) {
+          distA += Math.pow(f[i] - centroidA[i], 2);
+          distB += Math.pow(f[i] - centroidB[i], 2);
+        }
+        assignments[idx] = distA < distB ? 0 : 1;
+      });
+
+      const sumA = new Array(8).fill(0);
+      let countA = 0;
+      const sumB = new Array(8).fill(0);
+      let countB = 0;
+
+      featuresList.forEach((f, idx) => {
+        if (assignments[idx] === 0) {
+          for (let i = 0; i < 8; i++) sumA[i] += f[i];
+          countA++;
+        } else {
+          for (let i = 0; i < 8; i++) sumB[i] += f[i];
+          countB++;
+        }
+      });
+
+      if (countA > 0) centroidA = sumA.map(v => v / countA);
+      if (countB > 0) centroidB = sumB.map(v => v / countB);
+    }
+
+    const cluster0Indices = [];
+    const cluster1Indices = [];
+    assignments.forEach((assign, idx) => {
+      if (assign === 0) cluster0Indices.push(idx);
+      else cluster1Indices.push(idx);
+    });
+
+    return { cluster0Indices, cluster1Indices, centroidA, centroidB };
+  };
+
+  const processVideoFile = async (file) => {
+    if (!window.Pose) {
+      alert("MediaPipe Pose library is not loaded. Please wait.");
+      return;
+    }
+    
+    setIsProcessingVideo(true);
+    setVideoProcessProgress(0);
+    setVideoProcessLog("Initializing video extraction...");
+
+    try {
+      const video = document.createElement('video');
+      video.src = URL.createObjectURL(file);
+      video.playsInline = true;
+      video.muted = true;
+      
+      await new Promise((resolve, reject) => {
+        video.onloadedmetadata = () => resolve();
+        video.onerror = () => reject(new Error("Failed to load video file."));
+      });
+
+      const duration = video.duration;
+      const stepSize = 0.4;
+      const frames = [];
+
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = 640;
+      tempCanvas.height = 480;
+      const ctx = tempCanvas.getContext('2d');
+
+      const scannerPose = new window.Pose({
+        locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
+      });
+      scannerPose.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        enableSegmentation: false,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+
+      let currentScannedFrame = null;
+      scannerPose.onResults((results) => {
+        if (results.poseLandmarks) {
+          currentScannedFrame = extractFeatures(results.poseLandmarks);
+        } else {
+          currentScannedFrame = null;
+        }
+      });
+
+      let currentTime = 0;
+      while (currentTime < duration) {
+        video.currentTime = currentTime;
+        
+        await new Promise((resolve) => {
+          video.onseeked = () => resolve();
+        });
+
+        ctx.drawImage(video, 0, 0, 640, 480);
+        
+        currentScannedFrame = null;
+        await scannerPose.send({ image: tempCanvas });
+        
+        if (currentScannedFrame) {
+          frames.push(currentScannedFrame);
+        }
+
+        currentTime += stepSize;
+        const percent = Math.round((currentTime / duration) * 100);
+        setVideoProcessProgress(Math.min(percent, 99));
+        setVideoProcessLog(`Scanning video: ${percent}% (detected ${frames.length} skeletal structures)`);
+      }
+
+      scannerPose.close();
+      URL.revokeObjectURL(video.src);
+
+      if (frames.length < 6) {
+        throw new Error("Could not detect enough clear skeletal frames in the video. Please verify body visibility and lighting.");
+      }
+
+      setVideoProcessLog("Executing 2-Means clustering to distinguish start and peak poses...");
+
+      const angleVectors = frames.map(f => extractAngles(reconstructJoints(f)));
+      const { cluster0Indices, cluster1Indices, centroidA, centroidB } = runKMeans2(angleVectors);
+
+      if (cluster0Indices.length === 0 || cluster1Indices.length === 0) {
+        throw new Error("Clustering failed to split the movements. Make sure the video contains full repetitions.");
+      }
+
+      const sumAnglesA = centroidA[2] + centroidA[3] + centroidA[6] + centroidA[7];
+      const sumAnglesB = centroidB[2] + centroidB[3] + centroidB[6] + centroidB[7];
+      
+      const is0Start = sumAnglesA > sumAnglesB;
+      const startIndices = is0Start ? cluster0Indices : cluster1Indices;
+      const peakIndices = is0Start ? cluster1Indices : cluster0Indices;
+
+      const startSet = startIndices.map(idx => frames[idx]);
+      const peakSet = peakIndices.map(idx => frames[idx]);
+
+      setStartFrames(startSet);
+      setPeakFrames(peakSet);
+      
+      setVideoProcessProgress(100);
+      setVideoProcessLog(`Auto-extracted ${startSet.length} start poses and ${peakSet.length} peak contraction poses!`);
+      setIsProcessingVideo(false);
+
+      setTimeout(() => {
+        setStep(5);
+      }, 1000);
+    } catch (err) {
+      console.error(err);
+      setVideoProcessLog(`Error: ${err.message}`);
+      setIsProcessingVideo(false);
+      alert(err.message);
+    }
+  };
+
   // Callback when pose landmarks are returned (simply updates coordinates references)
   const onPoseResults = (results) => {
     if (results.poseLandmarks) {
@@ -301,9 +543,9 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
               if (next.length >= 30) {
                 setRecordingMode(null);
                 clearInterval(interval);
-                // Auto transition to next page
+                // Auto transition to peak position page (Step 4)
                 setTimeout(() => {
-                  setStep(3);
+                  setStep(4);
                   setRecordedCount(0);
                 }, 800);
               }
@@ -316,9 +558,9 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
               if (next.length >= 30) {
                 setRecordingMode(null);
                 clearInterval(interval);
-                // Auto transition to next page
+                // Auto transition to training page (Step 5)
                 setTimeout(() => {
-                  setStep(4);
+                  setStep(5);
                   setRecordedCount(0);
                 }, 800);
               }
@@ -386,7 +628,7 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
 
       setIsTraining(false);
       // Auto transition to final step
-      setStep(5);
+      setStep(6);
     } catch (e) {
       console.error(e);
       setIsTraining(false);
@@ -463,7 +705,11 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary)' }}>
               <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2" />
             </svg>
-            Create Exercise ({step}/5)
+            Create Exercise ({
+              creationMethod === 'video' 
+                ? (step === 7 ? '3/4' : step === 5 ? '3/4' : step === 6 ? '4/4' : `${step}/4`)
+                : (step === 1 ? '1/5' : step === 2 ? '2/5' : step === 3 ? '3/5' : step === 4 ? '4/5' : step === 5 ? '4/5' : '5/5')
+            })
           </h2>
           <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.25rem', cursor: 'pointer' }}>✕</button>
         </div>
@@ -615,20 +861,112 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
                 className="btn btn-primary"
                 style={{ marginTop: 'auto', padding: '0.75rem' }}
               >
-                Start Recording →
+                Choose Method →
               </button>
             </div>
           )}
 
-          {/* STEPS 2 & 3: Camera Capture Wizard Pages (Permanently mounted camera DOM to prevent unmounting/webcam drop) */}
-          {(step === 2 || step === 3) && (
+          {/* STEP 2: Method Selection */}
+          {step === 2 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', flexGrow: 1 }}>
+              <div style={{ textAlign: 'center' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: '850', fontFamily: 'Outfit, sans-serif', margin: '0 0 0.35rem' }}>Choose Training Method</h3>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '140%', margin: 0 }}>
+                  Select how you want to build this exercise's custom posture detection model.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                {/* Method 1: Webcam */}
+                <div
+                  className="glass-card"
+                  style={{
+                    cursor: 'pointer',
+                    padding: '1rem 1.25rem',
+                    border: '1px solid var(--border-light)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.25rem',
+                    transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
+                  }}
+                  onClick={() => {
+                    setCreationMethod('live');
+                    setStep(3); // Go to Webcam Start Pose
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.borderColor = 'var(--primary)';
+                    e.currentTarget.style.background = 'var(--primary-glow)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.borderColor = 'var(--border-light)';
+                    e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '800', color: 'var(--primary)' }}>
+                    📸 Live Webcam Recording
+                  </h4>
+                  <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                    Perform and hold the start and peak contraction positions manually in front of your camera.
+                  </p>
+                </div>
+
+                {/* Method 2: Video File */}
+                <div
+                  className="glass-card"
+                  style={{
+                    cursor: 'pointer',
+                    padding: '1rem 1.25rem',
+                    border: '1px solid var(--border-light)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.25rem',
+                    transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
+                  }}
+                  onClick={() => {
+                    setCreationMethod('video');
+                    setStep(7); // Go to Video Processing screen
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.borderColor = 'var(--secondary)';
+                    e.currentTarget.style.background = 'var(--secondary-glow)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.borderColor = 'var(--border-light)';
+                    e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '800', color: 'var(--secondary)' }}>
+                    📂 Import Video File (TikTok/YouTube)
+                  </h4>
+                  <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                    Upload a video clip of the exercise. AI will auto-extract start and peak contraction poses.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setStep(1)}
+                className="btn btn-secondary"
+                style={{ marginTop: 'auto', padding: '0.5rem', fontSize: '0.75rem' }}
+              >
+                ← Back to Details
+              </button>
+            </div>
+          )}
+
+          {/* STEPS 3 & 4: Camera Capture Wizard Pages (Webcam capturing) */}
+          {(step === 3 || step === 4) && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', flexGrow: 1 }}>
               <div style={{ textAlign: 'center' }}>
                 <h3 style={{ fontSize: '0.95rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif', margin: '0 0 0.25rem' }}>
-                  {step === 2 ? '1. Start Position' : '2. Peak Position'}
+                  {step === 3 ? '1. Start Position' : '2. Peak Position'}
                 </h3>
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0 }}>
-                  {step === 2 
+                  {step === 3 
                     ? 'Hold starting pose (e.g. arms fully down) and click Record.' 
                     : 'Hold peak pose (e.g. weights curled all the way up) and click Record.'}
                 </p>
@@ -653,33 +991,33 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: 'auto' }}>
                 <button
-                  onClick={() => startRecording(step === 2 ? 'start' : 'peak')}
+                  onClick={() => startRecording(step === 3 ? 'start' : 'peak')}
                   disabled={recordingMode || mpStatus !== 'loaded'}
                   className="btn btn-primary"
                   style={{ 
                     padding: '0.75rem', 
-                    background: step === 2 ? 'var(--primary)' : 'var(--secondary)', 
-                    borderColor: step === 2 ? 'var(--primary)' : 'var(--secondary)' 
+                    background: step === 3 ? 'var(--primary)' : 'var(--secondary)', 
+                    borderColor: step === 3 ? 'var(--primary)' : 'var(--secondary)' 
                   }}
                 >
                   {recordingMode 
                     ? 'Recording...' 
-                    : (step === 2 ? 'Record Start Pose' : 'Record Peak Pose')}
+                    : (step === 3 ? 'Record Start Pose' : 'Record Peak Pose')}
                 </button>
                 <button 
-                  onClick={() => setStep(step === 2 ? 1 : 2)} 
+                  onClick={() => setStep(step === 3 ? 2 : 3)} 
                   disabled={recordingMode} 
                   className="btn btn-secondary" 
                   style={{ padding: '0.5rem', fontSize: '0.75rem' }}
                 >
-                  {step === 2 ? '← Back to Details' : '← Back to Start Pose'}
+                  {step === 3 ? '← Back to Method Selection' : '← Back to Start Pose'}
                 </button>
               </div>
             </div>
           )}
 
-          {/* STEP 4: Train AI Model */}
-          {step === 4 && (
+          {/* STEP 5: Train AI Model */}
+          {step === 5 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', alignItems: 'center', textAlign: 'center', justifyContent: 'center', flexGrow: 1, padding: '1.5rem 0' }}>
               <div style={{
                 width: '64px',
@@ -723,8 +1061,8 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
             </div>
           )}
 
-          {/* STEP 5: Success & Save */}
-          {step === 5 && (
+          {/* STEP 6: Success & Save */}
+          {step === 6 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', alignItems: 'center', textAlign: 'center', justifyContent: 'center', flexGrow: 1, padding: '1rem 0' }}>
               <div style={{
                 width: '64px',
@@ -752,7 +1090,26 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
               <div style={{ width: '100%', background: 'hsla(0,0%,100%,0.02)', padding: '0.85rem', borderRadius: '8px', border: '1px solid var(--border-light)', textAlign: 'left', fontSize: '0.75rem' }}>
                 <div style={{ marginBottom: '0.25rem' }}><strong style={{ color: 'var(--text-secondary)' }}>Name:</strong> {exerciseName}</div>
                 <div style={{ marginBottom: '0.25rem' }}><strong style={{ color: 'var(--text-secondary)' }}>Category:</strong> {category}</div>
-                <div><strong style={{ color: 'var(--text-secondary)' }}>Target Muscles:</strong> {selectedMuscles.join(', ') || 'General Muscles'}</div>
+                <div style={{ marginBottom: '0.25rem' }}><strong style={{ color: 'var(--text-secondary)' }}>Target Muscles:</strong> {selectedMuscles.join(', ') || 'General Muscles'}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px dashed var(--border-light)' }}>
+                  <div>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Start Poses: {startFrames.length} frames</div>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Peak Poses: {peakFrames.length} frames</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const temp = startFrames;
+                      setStartFrames(peakFrames);
+                      setPeakFrames(temp);
+                      alert('Start and Peak poses swapped successfully!');
+                    }}
+                    className="btn btn-secondary"
+                    style={{ width: 'auto', padding: '0.3rem 0.6rem', fontSize: '0.65rem', margin: 0 }}
+                  >
+                    🔄 Swap Poses
+                  </button>
+                </div>
               </div>
 
               <button
@@ -761,6 +1118,77 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
                 style={{ padding: '0.85rem', width: '100%', marginTop: '1rem' }}
               >
                 Save & Deploy Exercise
+              </button>
+            </div>
+          )}
+
+          {/* STEP 7: Video Upload & Processing */}
+          {step === 7 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', flexGrow: 1 }}>
+              <div style={{ textAlign: 'center' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: '850', fontFamily: 'Outfit, sans-serif', margin: '0 0 0.35rem' }}>Import Workout Video</h3>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '140%', margin: 0 }}>
+                  Upload a video of the movement. We will automatically analyze your body positions.
+                </p>
+              </div>
+
+              {!isProcessingVideo ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{
+                    border: '2px dashed var(--border-light)',
+                    borderRadius: '8px',
+                    padding: '2rem 1rem',
+                    textAlign: 'center',
+                    background: 'hsla(0, 0%, 100%, 0.01)',
+                    position: 'relative',
+                    cursor: 'pointer'
+                  }}>
+                    <input
+                      type="file"
+                      accept="video/*"
+                      onChange={(e) => {
+                        const file = e.target.files[0];
+                        if (file) processVideoFile(file);
+                      }}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        opacity: 0,
+                        cursor: 'pointer'
+                      }}
+                    />
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                    </svg>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Choose Video file</div>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>MP4, WebM or MOV (max 1 minute)</div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', padding: '1rem 0' }}>
+                  <div style={{ position: 'relative', width: '64px', height: '64px', borderRadius: '50%', border: '3px solid var(--border-light)', borderTopColor: 'var(--secondary)', animation: 'spin 1.2s linear infinite' }}></div>
+                  <div style={{ width: '100%', background: 'hsla(0,0%,100%,0.05)', height: '6px', borderRadius: '3px', overflow: 'hidden', marginTop: '0.5rem' }}>
+                    <div style={{ width: `${videoProcessProgress}%`, background: 'var(--secondary)', height: '100%', transition: 'width 0.2s' }}></div>
+                  </div>
+                  <span style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-primary)' }}>
+                    Scanning: {videoProcessProgress}%
+                  </span>
+                  <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)', margin: 0, textAlign: 'center', fontFamily: 'monospace' }}>
+                    {videoProcessLog}
+                  </p>
+                </div>
+              )}
+
+              <button
+                onClick={() => setStep(2)}
+                disabled={isProcessingVideo}
+                className="btn btn-secondary"
+                style={{ marginTop: 'auto', padding: '0.5rem', fontSize: '0.75rem' }}
+              >
+                ← Back to Method Selection
               </button>
             </div>
           )}
