@@ -39,6 +39,24 @@ const StopIcon = () => (
   </svg>
 );
 
+const estimateRepsInReserve = (repTimes) => {
+  if (repTimes.length < 3) return null;
+  const n = repTimes.length;
+  // Calculate average of the first few reps as the baseline speed
+  const baselineReps = repTimes.slice(0, Math.max(1, n - 2));
+  const avgBaseline = baselineReps.reduce((sum, val) => sum + val, 0) / baselineReps.length;
+  const lastRepTime = repTimes[n - 1];
+
+  if (avgBaseline === 0) return null;
+  const slowdownRatio = lastRepTime / avgBaseline;
+
+  if (slowdownRatio >= 1.8) return 0;
+  if (slowdownRatio >= 1.5) return 1;
+  if (slowdownRatio >= 1.3) return 2;
+  if (slowdownRatio >= 1.1) return 3;
+  return 4; // 4+ reps in reserve
+};
+
 export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, setSelectedExerciseId: propSetExerciseId }) {
   const [localExerciseId, setLocalExerciseId] = useState('dumbbell-hammer-curl');
   const selectedExerciseId = propExerciseId || localExerciseId;
@@ -69,6 +87,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
   
   const repStateRef = useRef('idle'); // 'idle' | 'has_started' | 'has_peaked'
   const lastRepTimeRef = useRef(0);
+  const repTimesRef = useRef([]); // Track duration of each repetition
   const customTemplatesRef = useRef(null);
 
   const videoRef = useRef(null);
@@ -464,6 +483,10 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
         const now = Date.now();
         // 600ms debounce to prevent rapid double-firing
         if (now - lastRepTimeRef.current > 600) {
+          const repDurationSec = (now - lastRepTimeRef.current) / 1000;
+          repTimesRef.current.push(repDurationSec);
+          console.warn(`[REP STATE MACHINE] Rep ${repCount + 1} completed in ${repDurationSec.toFixed(2)} seconds.`);
+
           setRepCount(prev => prev + 1);
           lastRepTimeRef.current = now;
           repStateRef.current = 'has_started';
@@ -779,6 +802,8 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
     setTimerTime(0);
     setRepCount(0);
     repStateRef.current = 'idle';
+    lastRepTimeRef.current = Date.now(); // Set initial time to session start
+    repTimesRef.current = []; // Clear durations array
     setTimerActive(true);
   };
 
@@ -791,6 +816,9 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
   const handleSaveSession = () => {
     setTimerActive(false);
     
+    // Estimate RIR
+    const rir = estimateRepsInReserve(repTimesRef.current);
+    
     // Save to local workout_history
     const newLog = {
       id: `log-${Date.now()}`,
@@ -800,8 +828,15 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
       date: new Date().toISOString(),
       durationSec: timerTime,
       sets: [
-        { setId: 1, weight: Number(sessionWeight) || 0, reps: repCount, completed: true }
+        { 
+          setId: 1, 
+          weight: Number(sessionWeight) || 0, 
+          reps: repCount, 
+          completed: true,
+          rir: rir !== null ? rir : undefined
+        }
       ],
+      rir: rir !== null ? rir : undefined,
       mode: 'AI Camera'
     };
 
@@ -809,7 +844,8 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
       const stored = JSON.parse(localStorage.getItem('workout_history') || '[]');
       stored.unshift(newLog);
       localStorage.setItem('workout_history', JSON.stringify(stored));
-      alert(`Workout session logged successfully! (${repCount} reps in ${formatTime(timerTime)})`);
+      const rirText = rir !== null ? `${rir} RIR` : 'N/A';
+      alert(`Workout session logged successfully!\n\n- Exercise: ${activeExercise.name}\n- Reps: ${repCount}\n- Duration: ${formatTime(timerTime)}\n- Estimated RIR: ${rirText}`);
     } catch (e) {
       console.error(e);
     }

@@ -348,7 +348,7 @@ export default function HistoryView({ refreshTrigger, onRefresh }) {
                             <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace' }}>{formatDate(log.date)}</span>
                           </div>
                           <div style={{ fontWeight: '700', color: 'var(--text-primary)', textAlign: 'right' }}>
-                            {maxWeight}kg • {totalReps}r • {log.durationSec}s
+                            {maxWeight}kg • {totalReps}r • {log.durationSec}s{log.rir !== undefined ? ` • RIR ${log.rir}` : ''}
                           </div>
                         </div>
                       );
