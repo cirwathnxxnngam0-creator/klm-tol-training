@@ -67,9 +67,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
   const [currentPrimaryAngle, setCurrentPrimaryAngle] = useState(0);
   const [currentSecondaryAngle, setCurrentSecondaryAngle] = useState(0);
   
-  // Rep tracker state machine (Supports unilateral bilateral dual-side tracking with temporal debounce/throttle)
-  const leftRepStateRef = useRef('start'); 
-  const rightRepStateRef = useRef('start'); 
+  const repStateRef = useRef('idle'); // 'idle' | 'has_started' | 'has_peaked'
   const lastRepTimeRef = useRef(0);
   const customTemplatesRef = useRef(null);
 
@@ -277,7 +275,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
               const templateDistance = Math.sqrt(sumWeightedSquaredDiff);
               const temperature = Math.max(templateDistance / 2, 0.08);
 
-              customTemplatesRef.current = { avgStartAngles, avgPeakAngles, weights, temperature, extractAngles };
+              customTemplatesRef.current = { avgStartAngles, avgPeakAngles, weights, temperature, extractAngles, reconstructJoints };
               setModel(null); // No TFJS model required for custom exercises
               setModelStatus('loaded');
               setFormFeedback({ status: 'good', message: `AI Model for "${activeExercise.name}" initialized using joint angles!` });
@@ -421,76 +419,56 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
 
   // Unified state machine for rep tracking (combines physical angles & AI predictions on both sides)
   const updateRepState = (leftAngle, rightAngle, startProb = 0, endProb = 0) => {
-    let leftStart = false;
-    let leftPeak = false;
-    let rightStart = false;
-    let rightPeak = false;
-
     // Check if AI model is loaded and actively predicting
     const isAiActive = modelStatus === 'loaded';
 
-    if (activeExercise.isCustom) {
-      if (isAiActive) {
-        // Rely entirely on custom AI classification scores for both sides
-        leftStart = startProb > 0.70;
-        leftPeak = endProb > 0.70;
-        rightStart = startProb > 0.70;
-        rightPeak = endProb > 0.70;
-      }
-    } else if (selectedExerciseId === 'dumbbell-hammer-curl') {
-      if (isAiActive) {
-        // Stricter check: Require joint angle AND at least 30% AI classification confidence
-        leftStart = leftAngle > 135 && startProb > 0.30;
-        leftPeak = leftAngle < 75 && leftAngle > 15 && endProb > 0.30;
-        rightStart = rightAngle > 135 && startProb > 0.30;
-        rightPeak = rightAngle < 75 && rightAngle > 15 && endProb > 0.30;
-      } else {
-        // Fallback: angles must be in valid ranges (ignoring noise/occlusion 0 deg)
-        leftStart = leftAngle > 135;
-        leftPeak = leftAngle < 75 && leftAngle > 15;
-        rightStart = rightAngle > 135;
-        rightPeak = rightAngle < 75 && rightAngle > 15;
-      }
-    } else if (selectedExerciseId === 'dumbbell-deadlift') {
-      if (isAiActive) {
-        // Stricter check: Require joint angle AND at least 30% AI classification confidence
-        leftStart = leftAngle > 150 && startProb > 0.30;
-        leftPeak = leftAngle < 120 && leftAngle > 40 && endProb > 0.30;
-        rightStart = rightAngle > 150 && startProb > 0.30;
-        rightPeak = rightAngle < 120 && rightAngle > 40 && endProb > 0.30;
-      } else {
-        // Fallback: angles must be in valid ranges (ignoring noise/occlusion 0 deg)
-        leftStart = leftAngle > 150;
-        leftPeak = leftAngle < 120 && leftAngle > 40;
-        rightStart = rightAngle > 150;
-        rightPeak = rightAngle < 120 && rightAngle > 40;
+    // Simulate startProb and endProb based on joint angles if AI is inactive (fallback mode)
+    let simulatedStartProb = startProb;
+    let simulatedEndProb = endProb;
+
+    if (!isAiActive) {
+      if (selectedExerciseId === 'dumbbell-hammer-curl') {
+        const leftIsStart = leftAngle > 120;
+        const leftIsPeak = leftAngle < 85 && leftAngle > 15;
+        const rightIsStart = rightAngle > 120;
+        const rightIsPeak = rightAngle < 85 && rightAngle > 15;
+
+        simulatedStartProb = (leftIsStart || rightIsStart) ? 1.0 : 0.0;
+        simulatedEndProb = (leftIsPeak || rightIsPeak) ? 1.0 : 0.0;
+      } else if (selectedExerciseId === 'dumbbell-deadlift') {
+        const leftIsStart = leftAngle > 140;
+        const leftIsPeak = leftAngle < 130 && leftAngle > 40;
+        const rightIsStart = rightAngle > 140;
+        const rightIsPeak = rightAngle < 130 && rightAngle > 40;
+
+        simulatedStartProb = (leftIsStart || rightIsStart) ? 1.0 : 0.0;
+        simulatedEndProb = (leftIsPeak || rightIsPeak) ? 1.0 : 0.0;
       }
     }
 
-    let repTriggered = false;
+    // 3-step global state machine transitions (threshold: 0.75)
+    const threshold = 0.75;
 
-    // Check LEFT side rep count
-    if (leftRepStateRef.current === 'start' && leftPeak) {
-      leftRepStateRef.current = 'halfway';
-    } else if (leftRepStateRef.current === 'halfway' && leftStart) {
-      leftRepStateRef.current = 'start';
-      repTriggered = true;
-    }
-
-    // Check RIGHT side rep count
-    if (rightRepStateRef.current === 'start' && rightPeak) {
-      rightRepStateRef.current = 'halfway';
-    } else if (rightRepStateRef.current === 'halfway' && rightStart) {
-      rightRepStateRef.current = 'start';
-      repTriggered = true;
-    }
-
-    // Increment repCount with a 1-second debounce window to prevent double-counting simultaneous reps
-    if (repTriggered) {
-      const now = Date.now();
-      if (now - lastRepTimeRef.current > 1000) {
-        setRepCount(prev => prev + 1);
-        lastRepTimeRef.current = now;
+    if (repStateRef.current === 'idle') {
+      if (simulatedStartProb > threshold) {
+        repStateRef.current = 'has_started';
+        console.warn("[REP STATE MACHINE] Idle -> Has Started (Start pose calibrated)");
+      }
+    } else if (repStateRef.current === 'has_started') {
+      if (simulatedEndProb > threshold) {
+        repStateRef.current = 'has_peaked';
+        console.warn("[REP STATE MACHINE] Has Started -> Has Peaked (Peak contraction pose detected)");
+      }
+    } else if (repStateRef.current === 'has_peaked') {
+      if (simulatedStartProb > threshold) {
+        const now = Date.now();
+        // 600ms debounce to prevent rapid double-firing
+        if (now - lastRepTimeRef.current > 600) {
+          setRepCount(prev => prev + 1);
+          lastRepTimeRef.current = now;
+          repStateRef.current = 'has_started';
+          console.warn("[REP STATE MACHINE] Rep counted! Has Peaked -> Has Started (Returned to start pose)");
+        }
       }
     }
   };
@@ -800,6 +778,7 @@ export default function CameraPoseOverlay({ selectedExerciseId: propExerciseId, 
   const handleStartSession = () => {
     setTimerTime(0);
     setRepCount(0);
+    repStateRef.current = 'idle';
     setTimerActive(true);
   };
 
