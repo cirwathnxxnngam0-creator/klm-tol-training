@@ -23,6 +23,11 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
   const [videoProcessProgress, setVideoProcessProgress] = useState(0);
   const [videoProcessLog, setVideoProcessLog] = useState('');
 
+  // All video scanned frames and currently configured start/peak frame indexes
+  const [allScannedFrames, setAllScannedFrames] = useState([]);
+  const [startFrameIndex, setStartFrameIndex] = useState(0);
+  const [peakFrameIndex, setPeakFrameIndex] = useState(0);
+
   // Collected datasets
   const [startFrames, setStartFrames] = useState([]);
   const [peakFrames, setPeakFrames] = useState([]);
@@ -37,6 +42,8 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
   // Video and Canvas refs
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const startCanvasRef = useRef(null);
+  const peakCanvasRef = useRef(null);
   const poseInstanceRef = useRef(null);
   const requestRef = useRef(null);
   const currentJointsRef = useRef(null);
@@ -155,6 +162,71 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
       }
     }
   }, [tfActive, tfStatus]);
+
+  // Draw skeleton previews on Step 6 (Save screen)
+  useEffect(() => {
+    if (step === 6) {
+      const drawPreview = (canvas, frame, color) => {
+        if (!canvas || !frame) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        // Draw dark background box
+        ctx.fillStyle = 'hsl(240, 16%, 6%)';
+        ctx.fillRect(0, 0, w, h);
+
+        // Reconstruct joints from features
+        const joints = reconstructJoints(frame);
+
+        // Render connectors
+        const connections = [
+          [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
+          [11, 23], [12, 24], [23, 24],
+          [23, 25], [24, 26], [25, 27], [26, 28]
+        ];
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2.5;
+        
+        connections.forEach(([i, j]) => {
+          const p1 = joints[i];
+          const p2 = joints[j];
+          if (p1 && p2 && p1.visibility > 0.1 && p2.visibility > 0.1) {
+            ctx.beginPath();
+            ctx.moveTo(p1.x * w, p1.y * h);
+            ctx.lineTo(p2.x * w, p2.y * h);
+            ctx.stroke();
+          }
+        });
+
+        // Render joints points
+        Object.keys(joints).forEach(idx => {
+          const pt = joints[idx];
+          if (pt && pt.visibility > 0.1) {
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(pt.x * w, pt.y * h, 3, 0, 2 * Math.PI);
+            ctx.fill();
+          }
+        });
+      };
+
+      if (creationMethod === 'video' && allScannedFrames.length > 0) {
+        drawPreview(startCanvasRef.current, allScannedFrames[startFrameIndex], 'var(--primary)');
+        drawPreview(peakCanvasRef.current, allScannedFrames[peakFrameIndex], 'var(--secondary)');
+      } else {
+        // Webcam mode - draw average or first recorded frame
+        if (startFrames.length > 0) {
+          drawPreview(startCanvasRef.current, startFrames[0], 'var(--primary)');
+        }
+        if (peakFrames.length > 0) {
+          drawPreview(peakCanvasRef.current, peakFrames[0], 'var(--secondary)');
+        }
+      }
+    }
+  }, [step, startFrameIndex, peakFrameIndex, startFrames, peakFrames, allScannedFrames, creationMethod]);
 
   // Start video feed webcam
   useEffect(() => {
@@ -496,15 +568,43 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
       const is0Start = sumAnglesA > sumAnglesB;
       const startIndices = is0Start ? cluster0Indices : cluster1Indices;
       const peakIndices = is0Start ? cluster1Indices : cluster0Indices;
+      const startCentroid = is0Start ? centroidA : centroidB;
+      const peakCentroid = is0Start ? centroidB : centroidA;
 
-      const startSet = startIndices.map(idx => frames[idx]);
-      const peakSet = peakIndices.map(idx => frames[idx]);
+      // Find the frame index in startIndices that is closest to startCentroid
+      let bestStartIdx = startIndices[0];
+      let minStartDist = Infinity;
+      startIndices.forEach(idx => {
+        let dist = 0;
+        for (let i = 0; i < 8; i++) dist += Math.pow(angleVectors[idx][i] - startCentroid[i], 2);
+        if (dist < minStartDist) {
+          minStartDist = dist;
+          bestStartIdx = idx;
+        }
+      });
 
-      setStartFrames(startSet);
-      setPeakFrames(peakSet);
+      // Find the frame index in peakIndices that is closest to peakCentroid
+      let bestPeakIdx = peakIndices[0];
+      let minPeakDist = Infinity;
+      peakIndices.forEach(idx => {
+        let dist = 0;
+        for (let i = 0; i < 8; i++) dist += Math.pow(angleVectors[idx][i] - peakCentroid[i], 2);
+        if (dist < minPeakDist) {
+          minPeakDist = dist;
+          bestPeakIdx = idx;
+        }
+      });
+
+      setAllScannedFrames(frames);
+      setStartFrameIndex(bestStartIdx);
+      setPeakFrameIndex(bestPeakIdx);
+      
+      // Initialize startFrames and peakFrames so it passes step 5 train validation
+      setStartFrames([frames[bestStartIdx]]);
+      setPeakFrames([frames[bestPeakIdx]]);
       
       setVideoProcessProgress(100);
-      setVideoProcessLog(`Auto-extracted ${startSet.length} start poses and ${peakSet.length} peak contraction poses!`);
+      setVideoProcessLog(`Auto-extracted best start pose (frame ${bestStartIdx}) and peak pose (frame ${bestPeakIdx})!`);
       setIsProcessingVideo(false);
 
       setTimeout(() => {
@@ -648,8 +748,8 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
       defaultReps: 12,
       defaultWeightKg: 10,
       isCustom: true,
-      startFrames: startFrames,
-      peakFrames: peakFrames,
+      startFrames: creationMethod === 'video' ? [allScannedFrames[startFrameIndex]] : startFrames,
+      peakFrames: creationMethod === 'video' ? [allScannedFrames[peakFrameIndex]] : peakFrames,
       instructions: [
         'Stand in the exact starting position you recorded to reset the pose state.',
         'Perform the motion to reach the recorded peak position and trigger the rep count.'
@@ -1063,28 +1163,73 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
 
           {/* STEP 6: Success & Save */}
           {step === 6 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', alignItems: 'center', textAlign: 'center', justifyContent: 'center', flexGrow: 1, padding: '1rem 0' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center', textAlign: 'center', justifyContent: 'center', flexGrow: 1, padding: '0.5rem 0', width: '100%' }}>
               <div style={{
-                width: '64px',
-                height: '64px',
+                width: '48px',
+                height: '48px',
                 borderRadius: '50%',
                 background: 'var(--primary-glow)',
                 border: '2px solid var(--primary)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '2rem',
+                fontSize: '1.5rem',
                 color: 'var(--primary)',
-                filter: 'drop-shadow(0 0 10px var(--primary-glow))'
+                filter: 'drop-shadow(0 0 8px var(--primary-glow))'
               }}>
                 ✓
               </div>
 
               <div>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: '900', fontFamily: 'Outfit, sans-serif', margin: '0 0 0.35rem' }}>AI Classifier Ready!</h3>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '140%', margin: 0 }}>
-                  Successfully trained custom model in WebGL memory. Click save to publish this exercise to your dashboard.
+                <h3 style={{ fontSize: '1.05rem', fontWeight: '900', fontFamily: 'Outfit, sans-serif', margin: '0 0 0.25rem' }}>AI Classifier Ready!</h3>
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: '140%', margin: 0 }}>
+                  Inspect and fine-tune your templates below. drag the sliders to scrub different video frames.
                 </p>
+              </div>
+
+              {/* Skeletal Pose Preview & Slider Configuration */}
+              <div style={{ display: 'flex', gap: '1rem', width: '100%', justifyContent: 'center', margin: '0.25rem 0' }}>
+                {/* Start Pose Box */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', flex: '1 1 0', minWidth: 0 }}>
+                  <span style={{ fontSize: '0.7rem', fontWeight: '800', color: 'var(--primary)' }}>Start Position</span>
+                  <div style={{ position: 'relative', width: '100%', height: '140px', borderRadius: 'var(--radius-sm)', overflow: 'hidden', border: '1px solid var(--border-light)' }}>
+                    <canvas ref={startCanvasRef} width="160" height="160" style={{ width: '100%', height: '100%', objectFit: 'contain' }}></canvas>
+                  </div>
+                  {creationMethod === 'video' && allScannedFrames.length > 0 && (
+                    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                      <input
+                        type="range"
+                        min="0"
+                        max={allScannedFrames.length - 1}
+                        value={startFrameIndex}
+                        onChange={(e) => setStartFrameIndex(parseInt(e.target.value))}
+                        style={{ width: '100%', height: '4px', cursor: 'pointer', accentColor: 'var(--primary)' }}
+                      />
+                      <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>Frame {startFrameIndex + 1} of {allScannedFrames.length}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Peak Pose Box */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', flex: '1 1 0', minWidth: 0 }}>
+                  <span style={{ fontSize: '0.7rem', fontWeight: '800', color: 'var(--secondary)' }}>Peak Position</span>
+                  <div style={{ position: 'relative', width: '100%', height: '140px', borderRadius: 'var(--radius-sm)', overflow: 'hidden', border: '1px solid var(--border-light)' }}>
+                    <canvas ref={peakCanvasRef} width="160" height="160" style={{ width: '100%', height: '100%', objectFit: 'contain' }}></canvas>
+                  </div>
+                  {creationMethod === 'video' && allScannedFrames.length > 0 && (
+                    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                      <input
+                        type="range"
+                        min="0"
+                        max={allScannedFrames.length - 1}
+                        value={peakFrameIndex}
+                        onChange={(e) => setPeakFrameIndex(parseInt(e.target.value))}
+                        style={{ width: '100%', height: '4px', cursor: 'pointer', accentColor: 'var(--secondary)' }}
+                      />
+                      <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>Frame {peakFrameIndex + 1} of {allScannedFrames.length}</span>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div style={{ width: '100%', background: 'hsla(0,0%,100%,0.02)', padding: '0.85rem', borderRadius: '8px', border: '1px solid var(--border-light)', textAlign: 'left', fontSize: '0.75rem' }}>
@@ -1093,15 +1238,27 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
                 <div style={{ marginBottom: '0.25rem' }}><strong style={{ color: 'var(--text-secondary)' }}>Target Muscles:</strong> {selectedMuscles.join(', ') || 'General Muscles'}</div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px dashed var(--border-light)' }}>
                   <div>
-                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Start Poses: {startFrames.length} frames</div>
-                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Peak Poses: {peakFrames.length} frames</div>
+                    {creationMethod === 'video' ? (
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Timeline Poses: {allScannedFrames.length} frames</div>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Start Poses: {startFrames.length} frames</div>
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Peak Poses: {peakFrames.length} frames</div>
+                      </>
+                    )}
                   </div>
                   <button
                     type="button"
                     onClick={() => {
-                      const temp = startFrames;
-                      setStartFrames(peakFrames);
-                      setPeakFrames(temp);
+                      if (creationMethod === 'video') {
+                        const tempIdx = startFrameIndex;
+                        setStartFrameIndex(peakFrameIndex);
+                        setPeakFrameIndex(tempIdx);
+                      } else {
+                        const temp = startFrames;
+                        setStartFrames(peakFrames);
+                        setPeakFrames(temp);
+                      }
                       alert('Start and Peak poses swapped successfully!');
                     }}
                     className="btn btn-secondary"
@@ -1115,7 +1272,7 @@ export default function ExerciseCreatorModal({ onClose, onSaveComplete }) {
               <button
                 onClick={handleSave}
                 className="btn btn-primary"
-                style={{ padding: '0.85rem', width: '100%', marginTop: '1rem' }}
+                style={{ padding: '0.85rem', width: '100%', marginTop: '0.5rem' }}
               >
                 Save & Deploy Exercise
               </button>
