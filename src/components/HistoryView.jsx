@@ -161,8 +161,23 @@ export default function HistoryView({ refreshTrigger, onRefresh }) {
   }, [refreshTrigger]);
 
   const handleClearHistory = () => {
-    if (window.confirm('Are you sure you want to clear your workout history? This action is permanent.')) {
-      localStorage.removeItem('workout_history');
+    const isAll = filterExercise === 'all';
+    const confirmMsg = isAll
+      ? 'Are you sure you want to clear all workout history? This action is permanent.'
+      : 'Are you sure you want to clear the history for the selected exercise? This action is permanent.';
+
+    if (window.confirm(confirmMsg)) {
+      if (isAll) {
+        localStorage.removeItem('workout_history');
+      } else {
+        try {
+          const stored = JSON.parse(localStorage.getItem('workout_history') || '[]');
+          const updated = stored.filter(log => log.exerciseId !== filterExercise);
+          localStorage.setItem('workout_history', JSON.stringify(updated));
+        } catch (err) {
+          console.error('Failed to clear selected exercise history:', err);
+        }
+      }
       loadHistory();
       if (onRefresh) onRefresh();
     }
@@ -270,13 +285,13 @@ export default function HistoryView({ refreshTrigger, onRefresh }) {
           ))}
         </select>
 
-        {history.length > 0 && (
+        {filteredHistory.length > 0 && (
           <button
             onClick={handleClearHistory}
             className="btn btn-secondary"
             style={{ width: 'auto', padding: '0.5rem 0.85rem', fontSize: '0.75rem', color: 'var(--danger)', borderColor: 'hsla(350, 80%, 55%, 0.15)' }}
           >
-            Clear All
+            {filterExercise === 'all' ? 'Clear All' : 'Clear Selected'}
           </button>
         )}
       </div>
